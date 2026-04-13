@@ -1,0 +1,21 @@
+[project]
+name = "lexfcs-endpoint"
+version = "0.1.0"
+description = "LexFCS endpoint for the Bayerisches Dialektwörterbuch Online (BDO)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "BAdW Digital Humanities" },
+]
+
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "motor>=3.3.0",
+    "lxml>=5.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

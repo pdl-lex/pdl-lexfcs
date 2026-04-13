@@ -1,0 +1,22 @@
+services:
+  lexfcs-endpoint:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # NOTE: 'adl-mongodb' is the hostname of your existing MongoDB container.
+      # Make sure this service is on the same Docker network.
+      MONGODB_URI: "mongodb://admin:${MONGO_PASSWORD}@adl-mongodb:27017/admin"
+      MONGODB_DB: "lex"
+      BASE_URL: "${BASE_URL:-http://localhost:8080}"
+    networks:
+      - adl-network
+    restart: unless-stopped
+
+networks:
+  adl-network:
+    # Connect to the existing network where adl-mongodb is running.
+    # Find the network name with: docker network ls
+    # Then set it here, or use 'external: true' with the correct name.
+    external: true
+    name: ${DOCKER_NETWORK:-adl_default}
