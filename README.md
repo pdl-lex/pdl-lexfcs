@@ -52,7 +52,7 @@ Definiert das Mapping von LexFCS-Feldnamen auf MongoDB-Feldpfade.
 ### Voraussetzungen
 
 - Docker und Docker Compose
-- Zugang zum bestehenden MongoDB-Container (`adl-mongodb`)
+- Zugang zum bestehenden MongoDB-Container
 
 ### Setup
 
@@ -73,7 +73,7 @@ docker compose logs -f
 ```
 MONGO_PASSWORD=...                          # MongoDB-Passwort
 BASE_URL=http://localhost:8080              # Öffentliche URL des Endpoints
-DOCKER_NETWORK=pdl-deployment_adl-network  # Docker-Netzwerk der MongoDB
+DOCKER_NETWORK=...                          # Docker-Netzwerk der MongoDB
 ```
 
 ## SRU-Operationen
