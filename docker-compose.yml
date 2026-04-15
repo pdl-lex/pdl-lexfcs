@@ -1,16 +1,13 @@
 services:
   lexfcs-endpoint:
     build: .
-    ports:
-      - "8086:8080"
-    # Testing: accessible via wh.dev.lexoterm.de (host.docker.internal:8080)
-    # Production: remove ports, add to Caddy network, use reverse_proxy lexfcs-endpoint:8080
+    container_name: pdl-lexfcs
     environment:
-      # NOTE: 'adl-mongodb' is the hostname of your existing MongoDB container.
+      # NOTE: 'adl-mongodb' is the hostname of the existing MongoDB container.
       # Make sure this service is on the same Docker network.
       MONGODB_URI: "mongodb://admin:${MONGO_PASSWORD}@adl-mongodb:27017/admin"
       MONGODB_DB: "lex"
-      BASE_URL: "${BASE_URL:-https://wh.dev.lexoterm.de}"
+      BASE_URL: "${BASE_URL:-https://lexfcs.lexoterm.de}"
     networks:
       - adl-network
     restart: unless-stopped
