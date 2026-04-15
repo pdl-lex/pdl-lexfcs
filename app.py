@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 import os
 
-from sru_response import SRUExplainResponse, SRUSearchRetrieveResponse, SRUDiagnostic
+from sru_response import SRUExplainResponse, SRUSearchRetrieveResponse, SRUScanResponse, SRUDiagnostic
 from cql_parser import parse_cql
 from mongo_query import cql_to_mongo_query, UnsupportedIndexError
 
@@ -153,10 +153,7 @@ async def sru_endpoint(
                 details="scan",
                 message="Unsupported operation",
             ))
-        xml = SRUExplainResponse(
-            base_url=BASE_URL,
-            diagnostics=diagnostics,
-        ).to_xml()
+        xml = SRUScanResponse(diagnostics=diagnostics).to_xml()
         return _xml_response(xml, x_indent_response)
 
     # Validate recordXMLEscaping
@@ -346,7 +343,7 @@ async def handle_search_retrieve(
     total_count = await collection.count_documents(mongo_filter)
 
     # Check if startRecord is beyond the result set
-    if total_count > 0 and start_record > total_count:
+    if start_record > 1 and (total_count == 0 or start_record > total_count):
         diag = SRUDiagnostic(
             uri="info:srw/diagnostic/1/61",
             details=f"startRecord={start_record}",

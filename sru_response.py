@@ -222,6 +222,47 @@ class SRUExplainResponse:
 
 
 # ---------------------------------------------------------------------------
+# Scan Response (unsupported, diagnostics only)
+# ---------------------------------------------------------------------------
+
+class SRUScanResponse:
+    """Builds a minimal SRU scanResponse XML (for returning diagnostics)."""
+
+    def __init__(self, diagnostics: Optional[list] = None):
+        self.diagnostics = diagnostics or []
+
+    def to_xml(self) -> str:
+        parts = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<sru:scanResponse xmlns:sru="' + NS["sru"] + '">',
+            "  <sru:version>2.0</sru:version>",
+        ]
+
+        if self.diagnostics:
+            parts.append("  <sru:diagnostics>")
+            for diag in self.diagnostics:
+                parts.append(
+                    '    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">'
+                )
+                parts.append(
+                    "      <diag:uri>" + xml_escape(diag.uri) + "</diag:uri>"
+                )
+                parts.append(
+                    "      <diag:details>"
+                    + xml_escape(diag.details) + "</diag:details>"
+                )
+                parts.append(
+                    "      <diag:message>"
+                    + xml_escape(diag.message) + "</diag:message>"
+                )
+                parts.append("    </diag:diagnostic>")
+            parts.append("  </sru:diagnostics>")
+
+        parts.append("</sru:scanResponse>")
+        return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # searchRetrieve Response
 # ---------------------------------------------------------------------------
 
