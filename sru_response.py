@@ -294,7 +294,6 @@ class SRUSearchRetrieveResponse:
             "    <sru:record>",
             "      <sru:recordSchema>http://clarin.eu/fcs/resource</sru:recordSchema>",
             "      <sru:recordXMLEscaping>xml</sru:recordXMLEscaping>",
-            "      <sru:recordPosition>" + str(position) + "</sru:recordPosition>",
             "      <sru:recordData>",
             '        <fcs:Resource xmlns:fcs="' + NS["fcs"]
             + '" ref="' + xml_escape(ref_url) + '">',
@@ -302,6 +301,7 @@ class SRUSearchRetrieveResponse:
             self._build_lex_dataview(entry),
             "        </fcs:Resource>",
             "      </sru:recordData>",
+            "      <sru:recordPosition>" + str(position) + "</sru:recordPosition>",
             "    </sru:record>",
         ]
         return "\n".join(parts)

@@ -17,7 +17,7 @@ import os
 
 from sru_response import SRUExplainResponse, SRUSearchRetrieveResponse, SRUDiagnostic
 from cql_parser import parse_cql
-from mongo_query import cql_to_mongo_query
+from mongo_query import cql_to_mongo_query, UnsupportedIndexError
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -109,8 +109,13 @@ async def sru_endpoint(
     version: Optional[str] = Query("2.0"),
     query: Optional[str] = Query(None),
     queryType: Optional[str] = Query(None),
-    startRecord: Optional[int] = Query(1),
-    maximumRecords: Optional[int] = Query(25),
+    startRecord: Optional[str] = Query(None),
+    maximumRecords: Optional[str] = Query(None),
+    recordXMLEscaping: Optional[str] = Query(None),
+    # Scan parameters (not supported, but must return diagnostics)
+    scanClause: Optional[str] = Query(None),
+    responsePosition: Optional[str] = Query(None),
+    maximumTerms: Optional[str] = Query(None),
     # FCS-specific parameters (x- prefix)
     x_fcs_endpoint_description: Optional[str] = Query(
         None, alias="x-fcs-endpoint-description"
@@ -119,6 +124,94 @@ async def sru_endpoint(
     x_indent_response: Optional[str] = Query(None, alias="x-indent-response"),
 ):
     """Main SRU endpoint handling explain and searchRetrieve operations."""
+
+    # Handle scan operation: return unsupported operation diagnostic
+    if scanClause is not None:
+        diagnostics = []
+        # Check for invalid parameter values in scan context
+        if maximumTerms is not None:
+            try:
+                int(maximumTerms)
+            except (ValueError, TypeError):
+                diagnostics.append(SRUDiagnostic(
+                    uri="info:srw/diagnostic/1/6",
+                    details="maximumTerms",
+                    message="Unsupported parameter value",
+                ))
+        if responsePosition is not None:
+            try:
+                int(responsePosition)
+            except (ValueError, TypeError):
+                diagnostics.append(SRUDiagnostic(
+                    uri="info:srw/diagnostic/1/6",
+                    details="responsePosition",
+                    message="Unsupported parameter value",
+                ))
+        if not diagnostics:
+            diagnostics.append(SRUDiagnostic(
+                uri="info:srw/diagnostic/1/4",
+                details="scan",
+                message="Unsupported operation",
+            ))
+        xml = SRUExplainResponse(
+            base_url=BASE_URL,
+            diagnostics=diagnostics,
+        ).to_xml()
+        return _xml_response(xml, x_indent_response)
+
+    # Validate recordXMLEscaping
+    if recordXMLEscaping is not None and recordXMLEscaping not in ("xml", "string"):
+        diag = SRUDiagnostic(
+            uri="info:srw/diagnostic/1/71",
+            details=recordXMLEscaping,
+            message="Unsupported record packing",
+        )
+        xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+        return _xml_response(xml, x_indent_response)
+
+    # Validate and parse startRecord
+    start_record = 1
+    if startRecord is not None:
+        try:
+            start_record = int(startRecord)
+        except (ValueError, TypeError):
+            diag = SRUDiagnostic(
+                uri="info:srw/diagnostic/1/6",
+                details="startRecord",
+                message="Unsupported parameter value",
+            )
+            xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+            return _xml_response(xml, x_indent_response)
+        if start_record < 1:
+            diag = SRUDiagnostic(
+                uri="info:srw/diagnostic/1/6",
+                details="startRecord",
+                message="Unsupported parameter value",
+            )
+            xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+            return _xml_response(xml, x_indent_response)
+
+    # Validate and parse maximumRecords
+    maximum_records = 25
+    if maximumRecords is not None:
+        try:
+            maximum_records = int(maximumRecords)
+        except (ValueError, TypeError):
+            diag = SRUDiagnostic(
+                uri="info:srw/diagnostic/1/6",
+                details="maximumRecords",
+                message="Unsupported parameter value",
+            )
+            xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+            return _xml_response(xml, x_indent_response)
+        if maximum_records < 0:
+            diag = SRUDiagnostic(
+                uri="info:srw/diagnostic/1/6",
+                details="maximumRecords",
+                message="Unsupported parameter value",
+            )
+            xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+            return _xml_response(xml, x_indent_response)
 
     # Default operation: explain
     if operation is None and query is None:
@@ -136,8 +229,8 @@ async def sru_endpoint(
             version,
             query,
             queryType,
-            startRecord,
-            maximumRecords,
+            start_record,
+            maximum_records,
             x_fcs_context,
             x_indent_response,
         )
@@ -230,6 +323,14 @@ async def handle_search_retrieve(
     # Build MongoDB query
     try:
         mongo_filter = cql_to_mongo_query(parsed, source_filter)
+    except UnsupportedIndexError as e:
+        diag = SRUDiagnostic(
+            uri="info:srw/diagnostic/1/16",
+            details=e.index,
+            message="Unsupported index",
+        )
+        xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+        return _xml_response(xml, x_indent_response)
     except Exception as e:
         diag = SRUDiagnostic(
             uri="info:srw/diagnostic/1/47",
@@ -243,7 +344,20 @@ async def handle_search_retrieve(
     collection = request.app.state.entries
     
     total_count = await collection.count_documents(mongo_filter)
-    
+
+    # Check if startRecord is beyond the result set
+    if total_count > 0 and start_record > total_count:
+        diag = SRUDiagnostic(
+            uri="info:srw/diagnostic/1/61",
+            details=f"startRecord={start_record}",
+            message="First record position out of range",
+        )
+        xml = SRUSearchRetrieveResponse(
+            total_count=total_count,
+            diagnostics=[diag],
+        ).to_xml()
+        return _xml_response(xml, x_indent_response)
+
     cursor = (
         collection.find(mongo_filter)
         .skip(start_record - 1)  # SRU is 1-based

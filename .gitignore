@@ -18,7 +18,11 @@ wheels/
 # Dev Files
 db_sample/
 doku/
+validator/
 
 # ENV
 .env
 .ENV
+
+claude
+.claude

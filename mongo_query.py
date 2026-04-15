@@ -17,6 +17,14 @@ from cql_parser import SearchClause, BooleanQuery
 from typing import Optional, Union
 import re
 
+
+class UnsupportedIndexError(ValueError):
+    """Raised when a CQL query references an unsupported index/field."""
+    def __init__(self, index: str):
+        self.index = index
+        super().__init__(f"Unsupported index: {index}")
+
+
 # ---------------------------------------------------------------------------
 # Field mapping: LexCQL index name -> MongoDB field path(s)
 # ---------------------------------------------------------------------------
@@ -100,10 +108,7 @@ def _build_search_clause(clause: SearchClause) -> dict:
     # Get MongoDB field paths
     fields = FIELD_MAP.get(index)
     if not fields:
-        raise ValueError(
-            f"Unsupported query field: {clause.index}. "
-            f"Supported fields: {', '.join(FIELD_MAP.keys())}"
-        )
+        raise UnsupportedIndexError(clause.index)
 
     # Build the match condition based on relation and modifiers
     condition = _build_condition(term, relation, modifiers, index)
