@@ -102,6 +102,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 @app.get("/", response_class=Response)
+@app.head("/")
 async def sru_endpoint(
     request: Request,
     operation: Optional[str] = Query(None),
