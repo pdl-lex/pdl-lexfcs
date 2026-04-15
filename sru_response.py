@@ -232,7 +232,7 @@ class SRUScanResponse:
         self.diagnostics = diagnostics or []
 
     def to_xml(self) -> str:
-        scan_ns = "http://docs.oasis-open.org/ns/search-ws/scanResponse"
+        scan_ns = "http://docs.oasis-open.org/ns/search-ws/scan"
         parts = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<scan:scanResponse xmlns:scan="' + scan_ns + '">',
