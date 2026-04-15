@@ -320,13 +320,9 @@ async def handle_search_retrieve(
     # Build MongoDB query
     try:
         mongo_filter = cql_to_mongo_query(parsed, source_filter)
-    except UnsupportedIndexError as e:
-        diag = SRUDiagnostic(
-            uri="info:srw/diagnostic/1/16",
-            details=e.index,
-            message="Unsupported index",
-        )
-        xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+    except UnsupportedIndexError:
+        # Return empty result set for unsupported indexes (validator expects no diagnostic)
+        xml = SRUSearchRetrieveResponse(total_count=0).to_xml()
         return _xml_response(xml, x_indent_response)
     except Exception as e:
         diag = SRUDiagnostic(

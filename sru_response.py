@@ -232,14 +232,15 @@ class SRUScanResponse:
         self.diagnostics = diagnostics or []
 
     def to_xml(self) -> str:
+        scan_ns = "http://docs.oasis-open.org/ns/search-ws/scanResponse"
         parts = [
             '<?xml version="1.0" encoding="UTF-8"?>',
-            '<sru:scanResponse xmlns:sru="' + NS["sru"] + '">',
-            "  <sru:version>2.0</sru:version>",
+            '<scan:scanResponse xmlns:scan="' + scan_ns + '">',
+            "  <scan:version>2.0</scan:version>",
         ]
 
         if self.diagnostics:
-            parts.append("  <sru:diagnostics>")
+            parts.append("  <scan:diagnostics>")
             for diag in self.diagnostics:
                 parts.append(
                     '    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">'
@@ -256,9 +257,9 @@ class SRUScanResponse:
                     + xml_escape(diag.message) + "</diag:message>"
                 )
                 parts.append("    </diag:diagnostic>")
-            parts.append("  </sru:diagnostics>")
+            parts.append("  </scan:diagnostics>")
 
-        parts.append("</sru:scanResponse>")
+        parts.append("</scan:scanResponse>")
         return "\n".join(parts)
 
 
