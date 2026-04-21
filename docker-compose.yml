@@ -3,19 +3,14 @@ services:
     build: .
     container_name: pdl-lexfcs
     environment:
-      # NOTE: 'adl-mongodb' is the hostname of the existing MongoDB container.
-      # Make sure this service is on the same Docker network.
-      MONGODB_URI: "mongodb://admin:${MONGO_PASSWORD}@adl-mongodb:27017/admin"
+      MONGODB_URI: "mongodb://admin:${MONGO_PASSWORD}@pdl-mongodb:27017/admin"
       MONGODB_DB: "lex"
       BASE_URL: "${BASE_URL:-https://lexfcs.lexoterm.de}"
     networks:
-      - adl-network
+      - pdl-network
     restart: unless-stopped
 
 networks:
-  adl-network:
-    # Connect to the existing network where adl-mongodb is running.
-    # Find the network name with: docker network ls
-    # Then set it here, or use 'external: true' with the correct name.
+  pdl-network:
     external: true
-    name: ${DOCKER_NETWORK:-adl_default}
+    name: ${DOCKER_NETWORK:-pdl-deployment_pdl-network}
