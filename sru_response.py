@@ -9,7 +9,36 @@ Generates XML responses conforming to:
 
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlencode
 from xml.sax.saxutils import escape as xml_escape
+
+
+# ---------------------------------------------------------------------------
+# BDO search URL builder
+# ---------------------------------------------------------------------------
+
+BDO_SEARCH_BASE = "https://bdo.badw.de/suche"
+
+
+def build_bdo_ref_url(source: str, lemma: str) -> str:
+    """Build a BDO search URL for a given dictionary source and lemma.
+
+    BDO has no permalinks, but a parameterized search URL reproduces the
+    relevant entry. Brackets in parameter names are percent-encoded.
+    """
+    params = [
+        (f"options[dict][{source}]", "1"),
+        ("stichwort", ""),
+        ("options[case]", "1"),
+        ("options[exact]", "1"),
+        ("lemma", lemma),
+        ("bedeutung", ""),
+        ("beleg", ""),
+        ("wortfamilie", ""),
+        ("etymologie", ""),
+        ("options[createPermalink]", "0"),
+    ]
+    return BDO_SEARCH_BASE + "?" + urlencode(params)
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +357,9 @@ class SRUSearchRetrieveResponse:
         return "\n".join(parts)
 
     def _build_record(self, entry: dict, position: int) -> str:
-        source_id = entry.get("sourceId", entry.get("_id", ""))
         source = entry.get("source", "")
-        ref_url = self.base_url + "/" + source + "/" + source_id
+        lemma = entry.get("headword", {}).get("lemma", "")
+        ref_url = build_bdo_ref_url(source, lemma)
 
         parts = [
             "    <sru:record>",

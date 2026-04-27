@@ -4,7 +4,7 @@ FastAPI-based SRU/FCS endpoint implementing the LexFCS specification v0.3.
 
 Serves three lexical resources:
   - BWB (Bayerisches Wörterbuch)
-  - WBF (Wörterbuch der fränkischen Mundarten)
+  - WBF (Fränkisches Wörterbuch)
   - DIBS (Dialektologisches Informationssystem von Bayerisch-Schwaben)
 """
 
@@ -40,8 +40,8 @@ RESOURCES = {
     },
     "wbf": {
         "pid": f"{BASE_URL}/wbf",
-        "title_de": "Wörterbuch der fränkischen Mundarten (WBF)",
-        "title_en": "Dictionary of Franconian Dialects (WBF)",
+        "title_de": "Fränkisches Wörterbuch (WBF)",
+        "title_en": "Franconian Dictionary (WBF)",
         "description_de": "Fränkisches Wörterbuch der Bayerischen Akademie der Wissenschaften",
         "description_en": "Franconian Dictionary of the Bavarian Academy of Sciences and Humanities",
         "landing_page": "https://wbf.badw.de/",

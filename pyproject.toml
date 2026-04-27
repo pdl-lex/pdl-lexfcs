@@ -1,7 +1,7 @@
 [project]
 name = "lexfcs-endpoint"
 version = "0.1.0"
-description = "LexFCS endpoint for the Bayerisches Dialektwörterbuch Online (BDO)"
+description = "LexFCS endpoint for Bayerns Dialekte Online (BDO)"
 readme = "README.md"
 requires-python = ">=3.11"
 
