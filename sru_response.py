@@ -41,38 +41,73 @@ def build_bdo_ref_url(source: str, lemma: str) -> str:
     return BDO_SEARCH_BASE + "?" + urlencode(params)
 
 
-def split_citation_text_and_sources(cit: dict) -> tuple[str, list[str]]:
-    """Strip ``bibref`` annotations from a citation's text.
+def _normalize_ws(s: str) -> str:
+    return " ".join(s.split())
 
-    Returns the cleaned citation text and the list of bibliographic source
-    names that were embedded in the original text. Per LexFCS v0.3, source
-    references belong on ``<lex:Value>`` via ``@source`` rather than inline.
-    """
-    text = cit.get("text", "") or ""
-    bibrefs = sorted(
-        (a for a in cit.get("annotations", []) if a.get("type") == "bibref"),
-        key=lambda a: a.get("start", 0),
-    )
-    if not bibrefs:
-        return " ".join(text.split()), []
 
+def _slice_out(text: str, spans: list[tuple[int, int]]) -> str:
+    """Return ``text`` with all ``(start, end)`` ranges removed."""
+    if not spans:
+        return text
     pieces: list[str] = []
-    sources: list[str] = []
     pos = 0
-    for ann in bibrefs:
-        start = ann.get("start", 0)
-        end = ann.get("end", 0)
+    for start, end in sorted(spans):
         if start > pos:
             pieces.append(text[pos:start])
-        src = (ann.get("text", "") or "").strip()
-        if src:
-            sources.append(src)
-        pos = end
+        pos = max(pos, end)
     if pos < len(text):
         pieces.append(text[pos:])
+    return "".join(pieces)
 
-    cleaned = " ".join("".join(pieces).split())
-    return cleaned, sources
+
+def extract_citation_parts(cit: dict) -> dict:
+    """Decompose a citation's standoff annotations.
+
+    Returns a dict with:
+      - ``italic_text``: italic-labeled span(s) concatenated, or ``None``
+      - ``gloss_text``: text outside both italic and bibref spans, or ``None``
+        (only meaningful when ``italic_text`` is set; this is the gloss/paraphrase
+        that LexFCS expects to be linked back to a definition via ``@idRefs``)
+      - ``full_cleaned``: full text minus bibref spans (fallback when there's
+        no italic span)
+      - ``sources``: bibref names for use in ``@source``
+    """
+    text = cit.get("text", "") or ""
+    annotations = cit.get("annotations", [])
+
+    italic_spans: list[tuple[int, int]] = []
+    bibref_spans: list[tuple[int, int]] = []
+    sources: list[str] = []
+    for a in annotations:
+        start = a.get("start", 0)
+        end = a.get("end", 0)
+        atype = a.get("type")
+        if atype == "text" and "italic" in (a.get("labels") or []):
+            italic_spans.append((start, end))
+        elif atype == "bibref":
+            bibref_spans.append((start, end))
+            src = (a.get("text", "") or "").strip()
+            if src:
+                sources.append(src)
+
+    italic_text = None
+    if italic_spans:
+        joined = " ".join(text[s:e] for s, e in sorted(italic_spans))
+        italic_text = _normalize_ws(joined) or None
+
+    gloss_text = None
+    if italic_text is not None:
+        gloss_raw = _slice_out(text, italic_spans + bibref_spans)
+        gloss_text = _normalize_ws(gloss_raw) or None
+
+    full_cleaned = _normalize_ws(_slice_out(text, bibref_spans)) or None
+
+    return {
+        "italic_text": italic_text,
+        "gloss_text": gloss_text,
+        "full_cleaned": full_cleaned,
+        "sources": sources,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +438,7 @@ class SRUSearchRetrieveResponse:
             '        <fcs:Resource xmlns:fcs="' + NS["fcs"]
             + '" ref="' + xml_escape(ref_url) + '">',
             self._build_hits_dataview(entry),
-            self._build_lex_dataview(entry),
+            self._build_lex_dataview(entry, position),
             "        </fcs:Resource>",
             "      </sru:recordData>",
             "      <sru:recordPosition>" + str(position) + "</sru:recordPosition>",
@@ -430,7 +465,7 @@ class SRUSearchRetrieveResponse:
         ]
         return "\n".join(lines)
 
-    def _build_lex_dataview(self, entry: dict) -> str:
+    def _build_lex_dataview(self, entry: dict, position: int = 1) -> str:
         """Build the LexFCS Lexical Data View."""
         lang = entry.get("xml:lang", "DE").lower()
         lang_map = {"de": "deu", "en": "eng"}
@@ -477,20 +512,75 @@ class SRUSearchRetrieveResponse:
             )
             parts.append("              </lex:Field>")
 
-        # definitions
+        # senses, definitions, citations — built together because LexFCS v0.3
+        # links citations back to their definitions via @xml:id / @idRefs
+        # (see best-practices.adoc, "Connecting Values within Fields …")
         senses = entry.get("flatSenses", entry.get("sense", []))
-        defs_added = False
+        sense_def_ids: dict[int, str] = {}
+        for si, sense in enumerate(senses):
+            if sense.get("def"):
+                sense_def_ids[si] = f"e{position}-d{si + 1}"
+
+        # Pre-extract citation parts so we can decide which need a gloss sub-def
+        cit_parts: list[list[dict | None]] = []
         for sense in senses:
-            d = sense.get("def", "")
-            if d:
-                if not defs_added:
-                    parts.append('              <lex:Field type="definition">')
-                    defs_added = True
-                parts.append(
-                    '                <lex:Value xml:lang="' + lang_639 + '">'
-                    + xml_escape(d) + "</lex:Value>"
+            row: list[dict | None] = []
+            for cit in sense.get("cit", []):
+                row.append(
+                    extract_citation_parts(cit)
+                    if cit.get("type") == "example"
+                    else None
                 )
-        if defs_added:
+            cit_parts.append(row)
+
+        # Limit total citations across senses (keeps response size sane)
+        kept_cits: list[tuple[int, int, dict]] = []
+        for si, row in enumerate(cit_parts):
+            for ci, cp in enumerate(row):
+                if cp is None:
+                    continue
+                if cp["italic_text"] or cp["full_cleaned"]:
+                    kept_cits.append((si, ci, cp))
+                    if len(kept_cits) >= 10:
+                        break
+            if len(kept_cits) >= 10:
+                break
+
+        # Glosses are only emitted for kept citations whose sense has a def
+        # AND whose gloss is not just a duplicate of that def
+        gloss_ids: dict[tuple[int, int], str] = {}
+        for si, ci, cp in kept_cits:
+            if (
+                si in sense_def_ids
+                and cp["italic_text"]
+                and cp["gloss_text"]
+                and _normalize_ws(cp["gloss_text"])
+                != _normalize_ws(senses[si].get("def", ""))
+            ):
+                gloss_ids[(si, ci)] = f"{sense_def_ids[si]}-g{ci + 1}"
+
+        # Emit definition field (main defs + gloss sub-values)
+        if sense_def_ids:
+            parts.append('              <lex:Field type="definition">')
+            for si, sense in enumerate(senses):
+                def_id = sense_def_ids.get(si)
+                if not def_id:
+                    continue
+                parts.append(
+                    '                <lex:Value xml:id="' + def_id
+                    + '" xml:lang="' + lang_639 + '">'
+                    + xml_escape(sense["def"]) + "</lex:Value>"
+                )
+                for (gsi, gci), gid in gloss_ids.items():
+                    if gsi != si:
+                        continue
+                    gloss = cit_parts[gsi][gci]["gloss_text"]
+                    parts.append(
+                        '                <lex:Value xml:id="' + gid
+                        + '" idRefs="' + def_id
+                        + '" xml:lang="' + lang_639 + '">'
+                        + xml_escape(gloss) + "</lex:Value>"
+                    )
             parts.append("              </lex:Field>")
 
         # etymology
@@ -503,25 +593,22 @@ class SRUSearchRetrieveResponse:
             )
             parts.append("              </lex:Field>")
 
-        # citations
-        cits: list[tuple[str, list[str]]] = []
-        for sense in senses:
-            for cit in sense.get("cit", []):
-                if cit.get("type") != "example":
-                    continue
-                cit_text, sources = split_citation_text_and_sources(cit)
-                if cit_text:
-                    cits.append((cit_text, sources))
-        if cits:
+        # Emit citation field (italic span if present, else full cleaned text;
+        # @idRefs points to the gloss sub-def if any, else the main def)
+        if kept_cits:
             parts.append('              <lex:Field type="citation">')
-            for cit_text, sources in cits[:10]:
-                attrs = (
-                    ' xml:lang="' + lang_639 + '" type="example"'
-                )
-                if sources:
+            for si, ci, cp in kept_cits:
+                cit_text = cp["italic_text"] or cp["full_cleaned"]
+                if not cit_text:
+                    continue
+                target_id = gloss_ids.get((si, ci)) or sense_def_ids.get(si)
+                attrs = ' xml:lang="' + lang_639 + '" type="example"'
+                if target_id:
+                    attrs += ' idRefs="' + target_id + '"'
+                if cp["sources"]:
                     attrs += (
                         ' source="'
-                        + xml_escape("; ".join(sources)) + '"'
+                        + xml_escape("; ".join(cp["sources"])) + '"'
                     )
                 parts.append(
                     '                <lex:Value' + attrs + ">"
