@@ -41,6 +41,40 @@ def build_bdo_ref_url(source: str, lemma: str) -> str:
     return BDO_SEARCH_BASE + "?" + urlencode(params)
 
 
+def split_citation_text_and_sources(cit: dict) -> tuple[str, list[str]]:
+    """Strip ``bibref`` annotations from a citation's text.
+
+    Returns the cleaned citation text and the list of bibliographic source
+    names that were embedded in the original text. Per LexFCS v0.3, source
+    references belong on ``<lex:Value>`` via ``@source`` rather than inline.
+    """
+    text = cit.get("text", "") or ""
+    bibrefs = sorted(
+        (a for a in cit.get("annotations", []) if a.get("type") == "bibref"),
+        key=lambda a: a.get("start", 0),
+    )
+    if not bibrefs:
+        return " ".join(text.split()), []
+
+    pieces: list[str] = []
+    sources: list[str] = []
+    pos = 0
+    for ann in bibrefs:
+        start = ann.get("start", 0)
+        end = ann.get("end", 0)
+        if start > pos:
+            pieces.append(text[pos:start])
+        src = (ann.get("text", "") or "").strip()
+        if src:
+            sources.append(src)
+        pos = end
+    if pos < len(text):
+        pieces.append(text[pos:])
+
+    cleaned = " ".join("".join(pieces).split())
+    return cleaned, sources
+
+
 # ---------------------------------------------------------------------------
 # XML Namespaces
 # ---------------------------------------------------------------------------
@@ -470,19 +504,28 @@ class SRUSearchRetrieveResponse:
             parts.append("              </lex:Field>")
 
         # citations
-        cits = []
+        cits: list[tuple[str, list[str]]] = []
         for sense in senses:
             for cit in sense.get("cit", []):
-                text = cit.get("text", "").strip()
-                if text and cit.get("type") == "example":
-                    cits.append(text)
+                if cit.get("type") != "example":
+                    continue
+                cit_text, sources = split_citation_text_and_sources(cit)
+                if cit_text:
+                    cits.append((cit_text, sources))
         if cits:
             parts.append('              <lex:Field type="citation">')
-            for c in cits[:10]:
+            for cit_text, sources in cits[:10]:
+                attrs = (
+                    ' xml:lang="' + lang_639 + '" type="example"'
+                )
+                if sources:
+                    attrs += (
+                        ' source="'
+                        + xml_escape("; ".join(sources)) + '"'
+                    )
                 parts.append(
-                    '                <lex:Value xml:lang="' + lang_639
-                    + '" type="example">'
-                    + xml_escape(c) + "</lex:Value>"
+                    '                <lex:Value' + attrs + ">"
+                    + xml_escape(cit_text) + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")
 
