@@ -201,6 +201,9 @@ und den ersten Definitionen. Pflicht laut FCS Core 2.0.
 mit `<lex:Entry>`, `<lex:Field>` und `<lex:Value>` Elementen.
 Enthält: Lemma + Varianten, Entry-ID, Wortart, alle Definitionen,
 Etymologie, Belegstellen (max. 10) und verwandte Wörter.
+Bedeutungshierarchien (z. B. 2 → 2a, 2b) werden über `@xml:id`/`@idRefs`
+abgebildet: Unter-Definitionen referenzieren ihre Ober-Definition,
+Belegstellen referenzieren die zugehörige Definition.
 
 ## Validierung
 
