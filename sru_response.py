@@ -7,6 +7,7 @@ Generates XML responses conforming to:
   - LexFCS v0.3 (Lexical Data View, Endpoint Description extensions)
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlencode
@@ -39,6 +40,20 @@ def build_bdo_ref_url(source: str, lemma: str) -> str:
         ("options[createPermalink]", "0"),
     ]
     return BDO_SEARCH_BASE + "?" + urlencode(params)
+
+
+# Signal words that appear orphaned between bibrefs in citation text (not yet annotated
+# upstream). Sorted longest-first so the alternation matches greedily.
+_SIGNAL_WORD_RE = re.compile(
+    r"(?:(?<=\s)|^)"
+    r"(?:vgl\.\s*auch|vgl\.|s\.\s*auch|s\.\s*[aouv]\.|s\.|siehe\s+auch|siehe)"
+    r"(?=\s|$)",
+    re.IGNORECASE,
+)
+
+
+def _strip_signal_words(s: str) -> str:
+    return _normalize_ws(_SIGNAL_WORD_RE.sub("", s))
 
 
 def _normalize_ws(s: str) -> str:
@@ -98,7 +113,7 @@ def extract_citation_parts(cit: dict) -> dict:
     gloss_text = None
     if italic_text is not None:
         gloss_raw = _slice_out(text, italic_spans + bibref_spans)
-        gloss_text = _normalize_ws(gloss_raw) or None
+        gloss_text = _strip_signal_words(_normalize_ws(gloss_raw)) or None
 
     full_cleaned = _normalize_ws(_slice_out(text, bibref_spans)) or None
 

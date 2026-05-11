@@ -11,7 +11,7 @@ Der Endpoint stellt drei Wörterbücher als durchsuchbare Ressourcen bereit:
 | Kürzel | Name | Einträge |
 |--------|------|----------|
 | `bwb`  | Bayerisches Wörterbuch (BWB) | ~34.000 |
-| `wbf`  | Wörterbuch der fränkischen Mundarten (WBF) | ~69.000 |
+| `wbf`  | Fränkisches Wörterbuch (WBF) | ~69.000 |
 | `dibs` | Dialektologisches Informationssystem von Bayerisch-Schwaben (DIBS) | ~41.500 |
 
 ## Projektstruktur
