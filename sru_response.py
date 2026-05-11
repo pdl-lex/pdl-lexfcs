@@ -590,20 +590,7 @@ class SRUSearchRetrieveResponse:
             if len(kept_cits) >= 10:
                 break
 
-        # Glosses are only emitted for kept citations whose sense has a def
-        # AND whose gloss is not just a duplicate of that def
-        gloss_ids: dict[tuple[int, int], str] = {}
-        for si, ci, cp in kept_cits:
-            if (
-                si in sense_def_ids
-                and cp["italic_text"]
-                and cp["gloss_text"]
-                and _normalize_ws(cp["gloss_text"])
-                != _normalize_ws(senses[si].get("def", ""))
-            ):
-                gloss_ids[(si, ci)] = f"{sense_def_ids[si]}-g{ci + 1}"
-
-        # Emit definition field (main defs + gloss sub-values)
+        # Emit definition field
         if sense_def_ids:
             parts.append('              <lex:Field type="definition">')
             for si, sense in enumerate(senses):
@@ -615,16 +602,6 @@ class SRUSearchRetrieveResponse:
                     + '" xml:lang="' + lang_639 + '">'
                     + xml_escape(sense["def"]) + "</lex:Value>"
                 )
-                for (gsi, gci), gid in gloss_ids.items():
-                    if gsi != si:
-                        continue
-                    gloss = cit_parts[gsi][gci]["gloss_text"]
-                    parts.append(
-                        '                <lex:Value xml:id="' + gid
-                        + '" idRefs="' + def_id
-                        + '" xml:lang="' + lang_639 + '">'
-                        + xml_escape(gloss) + "</lex:Value>"
-                    )
             parts.append("              </lex:Field>")
 
         # etymology
@@ -638,15 +615,14 @@ class SRUSearchRetrieveResponse:
             parts.append("              </lex:Field>")
 
         # Emit citation field (full example text minus bibrefs; italic_text as fallback
-        # for simple headword-only citations; @idRefs points to the gloss sub-def if
-        # any, else the main def)
+        # for simple headword-only citations; @idRefs points to the sense definition)
         if kept_cits:
             parts.append('              <lex:Field type="citation">')
             for si, ci, cp in kept_cits:
                 cit_text = cp["full_cleaned"] or cp["italic_text"]
                 if not cit_text:
                     continue
-                target_id = gloss_ids.get((si, ci)) or sense_def_ids.get(si)
+                target_id = sense_def_ids.get(si)
                 attrs = ' xml:lang="' + lang_639 + '" type="example"'
                 if target_id:
                     attrs += ' idRefs="' + target_id + '"'
