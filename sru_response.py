@@ -115,7 +115,7 @@ def extract_citation_parts(cit: dict) -> dict:
         gloss_raw = _slice_out(text, italic_spans + bibref_spans)
         gloss_text = _strip_signal_words(_normalize_ws(gloss_raw)) or None
 
-    full_cleaned = _normalize_ws(_slice_out(text, bibref_spans)) or None
+    full_cleaned = _strip_signal_words(_normalize_ws(_slice_out(text, bibref_spans))) or None
 
     return {
         "italic_text": italic_text,
@@ -637,12 +637,13 @@ class SRUSearchRetrieveResponse:
             )
             parts.append("              </lex:Field>")
 
-        # Emit citation field (italic span if present, else full cleaned text;
-        # @idRefs points to the gloss sub-def if any, else the main def)
+        # Emit citation field (full example text minus bibrefs; italic_text as fallback
+        # for simple headword-only citations; @idRefs points to the gloss sub-def if
+        # any, else the main def)
         if kept_cits:
             parts.append('              <lex:Field type="citation">')
             for si, ci, cp in kept_cits:
-                cit_text = cp["italic_text"] or cp["full_cleaned"]
+                cit_text = cp["full_cleaned"] or cp["italic_text"]
                 if not cit_text:
                     continue
                 target_id = gloss_ids.get((si, ci)) or sense_def_ids.get(si)
