@@ -406,6 +406,23 @@ class SRUScanResponse:
 
 
 # ---------------------------------------------------------------------------
+# Sense tree helpers
+# ---------------------------------------------------------------------------
+
+def _collect_senses(sense_list: list) -> list[tuple[dict, dict | None]]:
+    """DFS over nested sense tree; returns [(sense, parent_sense_or_None), ...]."""
+    result: list[tuple[dict, dict | None]] = []
+
+    def _recurse(senses: list, parent: dict | None) -> None:
+        for s in senses:
+            result.append((s, parent))
+            _recurse(s.get("sense", []), s)
+
+    _recurse(sense_list, None)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # searchRetrieve Response
 # ---------------------------------------------------------------------------
 
@@ -559,11 +576,21 @@ class SRUSearchRetrieveResponse:
         # senses, definitions, citations — built together because LexFCS v0.3
         # links citations back to their definitions via @xml:id / @idRefs
         # (see best-practices.adoc, "Connecting Values within Fields …")
-        senses = entry.get("flatSenses", entry.get("sense", []))
+        sense_list = entry.get("sense") or entry.get("flatSenses") or []
+        sense_pairs = _collect_senses(sense_list)
+        senses = [s for s, _ in sense_pairs]
         sense_def_ids: dict[int, str] = {}
-        for si, sense in enumerate(senses):
+        parent_def_id: dict[int, str] = {}
+        sense_id_by_obj: dict[int, str] = {}
+        for si, (sense, parent_sense) in enumerate(sense_pairs):
             if sense.get("def"):
-                sense_def_ids[si] = f"e{position}-d{si + 1}"
+                my_id = f"e{position}-d{si + 1}"
+                sense_def_ids[si] = my_id
+                sense_id_by_obj[id(sense)] = my_id
+                if parent_sense is not None:
+                    p_id = sense_id_by_obj.get(id(parent_sense))
+                    if p_id:
+                        parent_def_id[si] = p_id
 
         # Pre-extract citation parts so we can decide which need a gloss sub-def
         cit_parts: list[list[dict | None]] = []
@@ -597,9 +624,11 @@ class SRUSearchRetrieveResponse:
                 def_id = sense_def_ids.get(si)
                 if not def_id:
                     continue
+                attrs = ' xml:id="' + def_id + '" xml:lang="' + lang_639 + '"'
+                if si in parent_def_id:
+                    attrs += ' idRefs="' + parent_def_id[si] + '"'
                 parts.append(
-                    '                <lex:Value xml:id="' + def_id
-                    + '" xml:lang="' + lang_639 + '">'
+                    '                <lex:Value' + attrs + ">"
                     + xml_escape(sense["def"]) + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")
