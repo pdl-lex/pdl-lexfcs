@@ -125,6 +125,35 @@ def extract_citation_parts(cit: dict) -> dict:
     }
 
 
+def extract_etym_parts(etym: dict) -> dict:
+    """Strip bibrefs from etymology text; filter signal words and punctuation remnants.
+
+    Returns a dict with:
+      - ``text``: cleaned etymology text, or ``None`` if nothing remains
+      - ``sources``: bibref strings for ``@source``
+    """
+    text = etym.get("text", "") or ""
+    annotations = etym.get("annotations", [])
+
+    bibref_spans: list[tuple[int, int]] = []
+    sources: list[str] = []
+    for a in annotations:
+        if a.get("type") == "bibref":
+            bibref_spans.append((a.get("start", 0), a.get("end", 0)))
+            src = (a.get("text", "") or "").strip()
+            if src:
+                sources.append(src)
+
+    if not bibref_spans:
+        return {"text": _normalize_ws(text) or None, "sources": []}
+
+    cleaned = _normalize_ws(_slice_out(text, bibref_spans))
+    cleaned = _strip_signal_words(cleaned)
+    cleaned = cleaned.rstrip(";., ") or None
+
+    return {"text": cleaned, "sources": sources}
+
+
 # ---------------------------------------------------------------------------
 # XML Namespaces
 # ---------------------------------------------------------------------------
@@ -601,12 +630,21 @@ class SRUSearchRetrieveResponse:
         # etymology
         etym = entry.get("etym")
         if etym and etym.get("text"):
-            parts.append('              <lex:Field type="etymology">')
-            parts.append(
-                '                <lex:Value xml:lang="' + lang_639 + '">'
-                + xml_escape(etym["text"]) + "</lex:Value>"
-            )
-            parts.append("              </lex:Field>")
+            ep = extract_etym_parts(etym)
+            etym_text = ep["text"]
+            if etym_text:
+                parts.append('              <lex:Field type="etymology">')
+                attrs = ' xml:lang="' + lang_639 + '"'
+                if ep["sources"]:
+                    attrs += (
+                        ' source="'
+                        + xml_escape("; ".join(ep["sources"])) + '"'
+                    )
+                parts.append(
+                    '                <lex:Value' + attrs + ">"
+                    + xml_escape(etym_text) + "</lex:Value>"
+                )
+                parts.append("              </lex:Field>")
 
         # Emit citation field (italic span if present, else full cleaned text;
         # @idRefs points to the gloss sub-def if any, else the main def)
