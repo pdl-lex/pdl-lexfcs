@@ -630,21 +630,12 @@ class SRUSearchRetrieveResponse:
         # etymology
         etym = entry.get("etym")
         if etym and etym.get("text"):
-            ep = extract_etym_parts(etym)
-            etym_text = ep["text"]
-            if etym_text:
-                parts.append('              <lex:Field type="etymology">')
-                attrs = ' xml:lang="' + lang_639 + '"'
-                if ep["sources"]:
-                    attrs += (
-                        ' source="'
-                        + xml_escape("; ".join(ep["sources"])) + '"'
-                    )
-                parts.append(
-                    '                <lex:Value' + attrs + ">"
-                    + xml_escape(etym_text) + "</lex:Value>"
-                )
-                parts.append("              </lex:Field>")
+            parts.append('              <lex:Field type="etymology">')
+            parts.append(
+                '                <lex:Value xml:lang="' + lang_639 + '">'
+                + xml_escape(etym["text"]) + "</lex:Value>"
+            )
+            parts.append("              </lex:Field>")
 
         # Emit citation field (italic span if present, else full cleaned text;
         # @idRefs points to the gloss sub-def if any, else the main def)
