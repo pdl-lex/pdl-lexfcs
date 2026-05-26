@@ -661,18 +661,29 @@ class SRUSearchRetrieveResponse:
                 )
             parts.append("              </lex:Field>")
 
-        # etymology
+        # etymology — strip bibref spans, then signal words and trailing punctuation
         etym = entry.get("etym")
         if etym and etym.get("text"):
-            parts.append('              <lex:Field type="etymology">')
-            parts.append(
-                '                <lex:Value xml:lang="'
-                + lang_639
-                + '">'
-                + xml_escape(etym["text"])
-                + "</lex:Value>"
-            )
-            parts.append("              </lex:Field>")
+            etym_text = etym["text"]
+            bibref_spans = [
+                (a.get("start", 0), a.get("end", 0))
+                for a in etym.get("annotations", [])
+                if a.get("type") == "bibref"
+            ]
+            if bibref_spans:
+                etym_text = _slice_out(etym_text, bibref_spans)
+            etym_text = _strip_signal_words(_normalize_ws(etym_text))
+            etym_text = etym_text.rstrip(";., ") or None
+            if etym_text:
+                parts.append('              <lex:Field type="etymology">')
+                parts.append(
+                    '                <lex:Value xml:lang="'
+                    + lang_639
+                    + '">'
+                    + xml_escape(etym_text)
+                    + "</lex:Value>"
+                )
+                parts.append("              </lex:Field>")
 
         # Emit citation field (full example text minus bibrefs; italic_text as fallback
         # for simple headword-only citations; @idRefs points to the sense definition)
