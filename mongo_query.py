@@ -15,11 +15,9 @@ Field mapping (LexCQL index -> MongoDB field):
 Parenthesis notation in stored lemma fields:
   Both headword.lemma and variants may store "(x)" to denote an optional
   character, e.g. "Wind(s)braut".  For default lemma searches (relation "=",
-  no modifiers) we therefore add $expr/$regexMatch conditions alongside the
-  standard $regex conditions.  These treat stored "(x)" as "(?:x)?" so that
-  both "Windbraut" and "Windsbraut" match the stored value "Wind(s)braut".
-
-  Requires MongoDB 4.4+ ($replaceAll).
+  no modifiers) a paren-aware $regex is added so that both "Windbraut" and
+  "Windsbraut" match the stored value "Wind(s)braut".  The regex is built
+  from the search term in Python — no aggregation operators required.
 """
 
 from cql_parser import SearchClause, BooleanQuery
@@ -124,13 +122,15 @@ def _build_search_clause(clause: SearchClause) -> dict:
 
     # For default lemma searches, headword.lemma and variants may contain stored
     # "(x)" notation meaning x is optional, e.g. "Wind(s)braut".
-    # Add $expr conditions alongside the standard $regex ones so that both
-    # "Windbraut" and "Windsbraut" find the stored value "Wind(s)braut".
+    # For default lemma searches, headword.lemma and variants may store the
+    # (x) optional-char convention, e.g. "Wind(s)braut".  Add paren-aware
+    # $regex conditions so that "Windbraut", "Windsbraut", and
+    # "Windspreuderer" all find "Wind(s)braut" / "Wind(s)spreuderer".
     # Only applies to relation "=" without modifiers (the default flexible search).
     if index == "lemma" and relation == "=" and not modifiers:
         field_conditions = [{f: condition} for f in fields]
         for f in fields:
-            field_conditions.append(_build_paren_aware_condition(term, f"${f}"))
+            field_conditions.append(_build_paren_aware_condition(term, f))
         return {"$or": field_conditions}
 
     # Standard case: apply condition to all mapped fields
@@ -203,103 +203,49 @@ def _build_condition(
         return {"$regex": re.escape(term), "$options": "i"}
 
 
-def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
+def _build_paren_aware_condition(term: str, field: str) -> dict:
     """
-    Build a MongoDB $expr condition that matches entries where a stored field
-    value, interpreted as a pattern with "(x)" meaning x is optional, matches
-    the search term.
+    Build a MongoDB $regex condition that finds stored values using the (x)
+    optional-char convention.
 
-    Example:  stored headword.lemma = "Wind(s)braut"
-              → pattern  "^Wind(?:s)?braut$"
-              → matches  "Windbraut"  ✓   and  "Windsbraut"  ✓
+    Stored values like "Wind(s)braut" encode an optional character:
+      - expansion WITH  the optional char: "Windsbraut"
+      - expansion WITHOUT the optional char: "Windbraut"
 
-    Works for both string fields (headword.lemma) and array fields (variants):
-    for arrays it checks whether ANY element matches.
+    This function generates a regex FROM the search term that matches both
+    forms in the stored representation, without touching the stored values.
 
-    Implementation: use $replaceAll to convert "(" → "(?:" and ")" → ")?" in
-    the stored value, then check the search term against that PCRE pattern via
-    $regexMatch.  Requires MongoDB 4.4+ ($replaceAll).
+    How it works — for each character c in the search term the regex component:
 
-    Args:
-        term:      the user's search term (constant string in the query)
-        field_ref: MongoDB expression for the field, e.g. "$headword.lemma"
+        (?:\\([^)]+\\))??  \\(?  c  \\)?
+
+      ① Non-greedy optional (x) group: skips a stored "(x)" group whose
+        character is NOT present in the search term (Case: "Windbraut" finds
+        stored "Wind(s)braut" — the (s) group is skipped).
+
+      ② \\(? c \\)?: matches c when it is wrapped in "(...)" in the stored
+        value (Case: "Windsbraut" finds stored "Wind(s)braut" — the s is
+        matched via its "(s)" wrapper).
+
+      The non-greedy quantifier on ① ensures the regex engine backtracks
+      correctly when a stored "(x)" should be consumed by component ② rather
+      than skipped.
+
+    Examples:
+      "Windsbraut"      matches stored "Wind(s)braut"      ✓
+      "Windbraut"       matches stored "Wind(s)braut"      ✓
+      "Windspreuderer"  matches stored "Wind(s)spreuderer" ✓
+      "Windsspreuderer" matches stored "Wind(s)spreuderer" ✓
+
+    Works with any MongoDB version; no $expr / aggregation operators needed.
+    For array fields (variants), MongoDB automatically applies $regex to each
+    element and returns the document if any element matches.
     """
-
-    def _match_one(value_expr) -> dict:
-        """$regexMatch: does `term` match the PCRE pattern derived from value_expr?
-
-        The stored value is used as the pattern source:
-          1. $ifNull guards against missing/null fields.
-          2. PCRE metacharacters (except ( and )) are escaped so they are
-             treated as literals rather than operators.  This prevents errors
-             like "quantifier does not follow a repeatable item" when a stored
-             value happens to contain ?, *, +, etc.
-          3. The (x) optional-char convention is converted to (?:x)?.
-
-        Note: ( and ) are intentionally NOT escaped in step 2 — they carry
-        the optional-char meaning and are handled in step 3.
-        """
-        # Step 1 – null safety
-        v = {"$ifNull": [value_expr, ""]}
-
-        # Step 2 – escape PCRE metacharacters in the stored value.
-        # Process backslash first to avoid double-escaping.
-        # ( and ) are excluded here; they are handled in step 3.
-        v = {"$replaceAll": {"input": v, "find": "\\",  "replacement": "\\\\"}}
-        for ch in [".", "*", "+", "?", "{", "}", "[", "]", "|", "^"]:
-            v = {"$replaceAll": {"input": v, "find": ch, "replacement": "\\" + ch}}
-        # $ is the only metachar that MongoDB would misread as a field path
-        # in the "find" position, so we use $literal there.
-        v = {"$replaceAll": {
-            "input": v,
-            "find": {"$literal": "$"},
-            "replacement": "\\$",
-        }}
-
-        # Step 3 – convert (x) notation to PCRE optional group (?:x)?
-        v = {"$replaceAll": {
-            "input": {"$replaceAll": {"input": v, "find": "(", "replacement": "(?:"}},
-            "find": ")",
-            "replacement": ")?",
-        }}
-
-        return {
-            "$regexMatch": {
-                "input": term,
-                "regex": {"$concat": ["^", v, {"$literal": "$"}]},
-                "options": "i",
-            }
-        }
-
-    # For array fields: match if any element satisfies the condition.
-    # For string fields: match directly.
-    # $anyElementTrue requires its argument wrapped in [ ] in older MongoDB.
-    match_condition = {
-        "$cond": {
-            "if": {"$isArray": field_ref},
-            "then": {
-                "$anyElementTrue": [
-                    {
-                        "$map": {
-                            "input": field_ref,
-                            "as": "item",
-                            "in": _match_one("$$item"),
-                        }
-                    }
-                ]
-            },
-            "else": _match_one(field_ref),
-        }
-    }
-
-    return {
-        "$expr": {
-            "$and": [
-                # Quick pre-filter: skip documents where the field is absent/null.
-                # $replaceAll/$regexMatch handle null safely via $ifNull above,
-                # but this avoids unnecessary work on the majority of documents.
-                {"$gt": [field_ref, None]},
-                match_condition,
-            ]
-        }
-    }
+    parts = []
+    for c in term:
+        ec = re.escape(c)
+        # ① skip a stored "(x)" group not present in search term (non-greedy)
+        # ② match c, which may itself be wrapped in "(c)" in the stored value
+        parts.append(r'(?:\([^)]+\))??' + r'\(?' + ec + r'\)?')
+    pattern = '^' + ''.join(parts) + '$'
+    return {field: {"$regex": pattern, "$options": "i"}}
