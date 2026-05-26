@@ -28,6 +28,7 @@ class SearchClause:
     relation: str     # e.g. "=", "==", "is"
     modifiers: list   # e.g. ["contains", "startswith"]
     term: str         # the search term
+    is_default: bool = False  # True when no index was given (bare-term default)
 
 
 @dataclass
@@ -172,6 +173,7 @@ class CQLParser:
                     relation="=",
                     modifiers=[],
                     term=first_value,
+                    is_default=True,  # no explicit index given
                 )
 
         raise ValueError(f"Unexpected token: {token[1]}")

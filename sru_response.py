@@ -583,12 +583,25 @@ class SRUSearchRetrieveResponse:
             )
             parts.append("              </lex:Field>")
 
-        # pos
-        pos = entry.get("pos", "")
-        if pos:
+        # pos — map German source value to English/UD, add vocabRef attributes
+        pos_raw = entry.get("pos", "")
+        if pos_raw:
+            from pos_mapping import DE_TO_EN, VOCAB_VALUE_REF, UD_POS_VOCAB_REF
+            pos_en = DE_TO_EN.get(pos_raw, pos_raw)
+            vocab_value_ref = VOCAB_VALUE_REF.get(pos_en)
+            pos_attrs = ""
+            if vocab_value_ref:
+                pos_attrs = (
+                    ' vocabRef="' + UD_POS_VOCAB_REF + '"'
+                    ' vocabValueRef="' + vocab_value_ref + '"'
+                )
             parts.append('              <lex:Field type="pos">')
             parts.append(
-                "                <lex:Value>" + xml_escape(pos) + "</lex:Value>"
+                "                <lex:Value"
+                + pos_attrs
+                + ">"
+                + xml_escape(pos_en)
+                + "</lex:Value>"
             )
             parts.append("              </lex:Field>")
 

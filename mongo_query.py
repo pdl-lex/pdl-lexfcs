@@ -23,7 +23,7 @@ Parenthesis notation in stored lemma fields:
 CQL masking (LexFCS spec, default modifier):
   * → .* (zero or more characters)
   ? → .  (exactly one character)
-  \* / \? → literal * / ?  (escaped wildcards)
+  \\* / \\? → literal * / ?  (escaped wildcards)
   /unmasked modifier → all characters are literal (re.escape)
   /regexp modifier   → term is used as a raw MongoDB regex pattern
 """
@@ -55,6 +55,23 @@ FIELD_MAP = {
     "related": ["compounds.text", "derivations.text"],
     "lang": ["xml:lang"],
 }
+
+# ---------------------------------------------------------------------------
+# Belegstellen extension for bare-term (no explicit index) searches
+# ---------------------------------------------------------------------------
+# When a search term is given without an explicit index (e.g. "Humboldt AND Amerika"),
+# the parser defaults to the "lemma" index. To also find entries where the terms
+# appear in citation texts or definitions, list additional MongoDB fields here.
+#
+# These fields are always matched with a simple case-insensitive substring regex
+# (no paren-aware logic, no start/end anchors). Paren-aware matching remains
+# restricted to headword.lemma and variants.
+#
+# Set to an empty list to disable Belegstellen extension (lemma-only default).
+BARE_TERM_EXTRA_FIELDS: list = [
+    "flatSenses.cit.text",
+    "flatSenses.def",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -171,29 +188,60 @@ def _build_search_clause(clause: SearchClause) -> dict:
     if not fields:
         raise UnsupportedIndexError(clause.index)
 
+    # For pos: translate English/UD query terms to German stored values.
+    # Only for simple "=" searches without modifiers.
+    # E.g. "pos = NOUN" → searches stored "Substantiv";
+    #      "pos = DET"  → searches "Determinativ" OR "Possessivum".
+    if index == "pos" and relation == "=" and not modifiers:
+        from pos_mapping import EN_TO_DE
+        de_terms = EN_TO_DE.get(term.upper())
+        if de_terms:
+            if len(de_terms) == 1:
+                term = de_terms[0]
+            else:
+                # Multiple German equivalents (e.g. DET → Determinativ + Possessivum)
+                return {"$or": [
+                    {"pos": _build_condition(t, relation, modifiers, index)}
+                    for t in de_terms
+                ]}
+
     # Build the match condition based on relation and modifiers
     condition = _build_condition(term, relation, modifiers, index)
 
-    # For default lemma searches without wildcards, headword.lemma and variants
-    # may store the (x) optional-char convention, e.g. "Wind(s)braut".  Add
-    # paren-aware $regex conditions so that "Windbraut", "Windsbraut", and
-    # "Windspreuderer" all find "Wind(s)braut" / "Wind(s)spreuderer".
-    # Only applies to relation "=" without modifiers (the default flexible search)
-    # and without CQL wildcards (for wildcard terms, .* naturally traverses the
-    # stored "(x)" groups, so the standard condition is sufficient).
+    # For bare-term searches (no explicit index given), optionally extend the
+    # search to Belegstellen fields (flatSenses.cit.text, flatSenses.def).
+    # These are always matched with citation-style substring regex — no paren-aware,
+    # no start/end anchors.  See BARE_TERM_EXTRA_FIELDS above.
+    extra_fields: list = []
+    belegstellen_cond: dict = {}
+    if index == "lemma" and clause.is_default and BARE_TERM_EXTRA_FIELDS:
+        extra_fields = BARE_TERM_EXTRA_FIELDS
+        # Use citation-style condition (substring, case-insensitive) for Belegstellen
+        belegstellen_cond = _build_condition(term, relation, modifiers, "citation")
+
+    # For lemma index with default relation "=" and no modifiers:
+    # add paren-aware $regex conditions for headword.lemma and variants.
+    # Only applies without CQL wildcards (for wildcard terms, .* naturally traverses
+    # the stored "(x)" groups, so the standard condition is sufficient).
     if index == "lemma" and relation == "=" and not modifiers:
         if not _has_unescaped_wildcards(term):
             field_conditions = [{f: condition} for f in fields]
             for f in fields:
                 field_conditions.append(_build_paren_aware_condition(term, f))
+            # Append Belegstellen conditions (simple substring, no paren-aware)
+            for f in extra_fields:
+                field_conditions.append({f: belegstellen_cond})
             return {"$or": field_conditions}
         # Wildcard term: fall through to standard case below.
 
-    # Standard case: apply condition to all mapped fields
-    if len(fields) == 1:
-        return {fields[0]: condition}
-    else:
-        return {"$or": [{f: condition} for f in fields]}
+    # Standard case: apply condition to all mapped fields, plus Belegstellen extras
+    all_conditions = [{f: condition} for f in fields]
+    for f in extra_fields:
+        all_conditions.append({f: belegstellen_cond})
+
+    if len(all_conditions) == 1:
+        return all_conditions[0]
+    return {"$or": all_conditions}
 
 
 def _build_condition(

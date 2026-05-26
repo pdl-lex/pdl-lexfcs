@@ -111,12 +111,24 @@ Parameter:
 
 ### Einfache Suche (Term-Query)
 
-Sucht im Lemma-Feld:
+Ohne Feldangabe wird standardmäßig im Lemma **und** in den Belegstellen (Zitattexte
+und Definitionen) gesucht:
 
     GET /?query=Haus
     GET /?query="Haus"
 
+Das bedeutet: Treffer sind Einträge, bei denen „Haus" entweder als Stichwort vorkommt
+*oder* im Text einer Belegstelle bzw. Definition auftaucht.
+
+> **Hinweis für Entwickler:** Welche Zusatzfelder bei der Freitextsuche durchsucht werden,
+> steuert die Konstante `BARE_TERM_EXTRA_FIELDS` in `mongo_query.py`.
+> Standard: `["flatSenses.cit.text", "flatSenses.def"]`.
+> Auf `[]` setzen, um ausschließlich im Lemma zu suchen.
+
 ### Feldsuche (Index-Query)
+
+Mit expliziter Feldangabe wird **nur** in dem angegebenen Feld gesucht — keine
+automatische Erweiterung auf Belegstellen:
 
     GET /?query=lemma = "Haus"
     GET /?query=definition = "Getreide"
@@ -155,6 +167,8 @@ Verfügbare Felder:
 
 ### Boolean-Operatoren
 
+Die Operatoren `AND`, `OR` und `NOT` lassen sich mit expliziten Feldern kombinieren:
+
     GET /?query=pos = "Verb" AND definition = "essen"
     GET /?query=lemma = "Haus" OR lemma = "Hütte"
     GET /?query=pos = "Substantiv" AND NOT definition = "Tier"
@@ -162,6 +176,30 @@ Verfügbare Felder:
 Klammern werden unterstützt:
 
     GET /?query=(pos = "Verb" OR pos = "Substantiv") AND definition = "Wasser"
+
+**Freitextsuche in Belegstellen mit AND/OR**
+
+Werden Suchwörter ohne Feldangabe mit `AND` oder `OR` verknüpft, durchsucht der
+Endpoint automatisch die Belegstellentexte und Definitionen — nicht nur die Lemmata.
+Das entspricht dem in der LexFCS-FAQ beschriebenen Verhalten:
+
+    GET /?query=Humboldt AND Amerika
+
+→ Findet Einträge, in deren Belegstellen *beide* Wörter vorkommen.
+
+    GET /?query=Brout AND wiaft
+
+→ Findet z. B. den Eintrag „Brot" wegen der Belegstelle
+  *„wia ma a Brout wegat wiaft, hat da Teifö Gwaöt drüba"*.
+
+Zu beachten: Die Belegstellensuche erfolgt als einfache Teilstring-Suche
+(Groß-/Kleinschreibung wird ignoriert). Die spezielle Klammer-Notation für optionale
+Zeichen (z. B. `Wind(s)braut`) gilt ausschließlich für Lemma-Felder, nicht für
+Belegstellen.
+
+Wer gezielt nur in Belegstellen suchen möchte, kann den Index explizit angeben:
+
+    GET /?query=citation = "Brout" AND citation = "wiaft"
 
 ### Einschränkung auf Wörterbuch
 
