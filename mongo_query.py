@@ -15,9 +15,17 @@ Field mapping (LexCQL index -> MongoDB field):
 Parenthesis notation in stored lemma fields:
   Both headword.lemma and variants may store "(x)" to denote an optional
   character, e.g. "Wind(s)braut".  For default lemma searches (relation "=",
-  no modifiers) a paren-aware $regex is added so that both "Windbraut" and
-  "Windsbraut" match the stored value "Wind(s)braut".  The regex is built
-  from the search term in Python — no aggregation operators required.
+  no modifiers, no wildcards) a paren-aware $regex is added so that both
+  "Windbraut" and "Windsbraut" match the stored value "Wind(s)braut".  The
+  regex is built from the search term in Python — no aggregation operators
+  required.
+
+CQL masking (LexFCS spec, default modifier):
+  * → .* (zero or more characters)
+  ? → .  (exactly one character)
+  \* / \? → literal * / ?  (escaped wildcards)
+  /unmasked modifier → all characters are literal (re.escape)
+  /regexp modifier   → term is used as a raw MongoDB regex pattern
 """
 
 from cql_parser import SearchClause, BooleanQuery
@@ -104,6 +112,52 @@ def _build_filter(node: Union[SearchClause, BooleanQuery]) -> dict:
         raise ValueError(f"Unknown AST node type: {type(node)}")
 
 
+def _mask_to_regex(term: str) -> str:
+    """
+    Convert a CQL masked search term to a regex pattern fragment.
+
+    CQL masking rules (the implicit default modifier):
+      *          →  .*   (zero or more characters)
+      ?          →  .    (exactly one character)
+      \\*, \\?   →  literal * or ?  (escaped wildcards)
+      \\\\       →  literal \\
+      \\"        →  literal "
+      all other  →  re.escape(c)
+    """
+    parts = []
+    i = 0
+    while i < len(term):
+        c = term[i]
+        if c == '\\' and i + 1 < len(term) and term[i + 1] in ('*', '?', '\\', '"'):
+            # Escaped special character → treat as literal
+            parts.append(re.escape(term[i + 1]))
+            i += 2
+        elif c == '*':
+            parts.append('.*')
+            i += 1
+        elif c == '?':
+            parts.append('.')
+            i += 1
+        else:
+            parts.append(re.escape(c))
+            i += 1
+    return ''.join(parts)
+
+
+def _has_unescaped_wildcards(term: str) -> bool:
+    """Return True if term contains unescaped CQL wildcard characters (* or ?)."""
+    i = 0
+    while i < len(term):
+        c = term[i]
+        if c == '\\' and i + 1 < len(term) and term[i + 1] in ('*', '?', '\\', '"'):
+            i += 2  # skip escaped character
+        elif c in ('*', '?'):
+            return True
+        else:
+            i += 1
+    return False
+
+
 def _build_search_clause(clause: SearchClause) -> dict:
     """Build a MongoDB filter for a single CQL search clause."""
 
@@ -120,18 +174,20 @@ def _build_search_clause(clause: SearchClause) -> dict:
     # Build the match condition based on relation and modifiers
     condition = _build_condition(term, relation, modifiers, index)
 
-    # For default lemma searches, headword.lemma and variants may contain stored
-    # "(x)" notation meaning x is optional, e.g. "Wind(s)braut".
-    # For default lemma searches, headword.lemma and variants may store the
-    # (x) optional-char convention, e.g. "Wind(s)braut".  Add paren-aware
-    # $regex conditions so that "Windbraut", "Windsbraut", and
+    # For default lemma searches without wildcards, headword.lemma and variants
+    # may store the (x) optional-char convention, e.g. "Wind(s)braut".  Add
+    # paren-aware $regex conditions so that "Windbraut", "Windsbraut", and
     # "Windspreuderer" all find "Wind(s)braut" / "Wind(s)spreuderer".
-    # Only applies to relation "=" without modifiers (the default flexible search).
+    # Only applies to relation "=" without modifiers (the default flexible search)
+    # and without CQL wildcards (for wildcard terms, .* naturally traverses the
+    # stored "(x)" groups, so the standard condition is sufficient).
     if index == "lemma" and relation == "=" and not modifiers:
-        field_conditions = [{f: condition} for f in fields]
-        for f in fields:
-            field_conditions.append(_build_paren_aware_condition(term, f))
-        return {"$or": field_conditions}
+        if not _has_unescaped_wildcards(term):
+            field_conditions = [{f: condition} for f in fields]
+            for f in fields:
+                field_conditions.append(_build_paren_aware_condition(term, f))
+            return {"$or": field_conditions}
+        # Wildcard term: fall through to standard case below.
 
     # Standard case: apply condition to all mapped fields
     if len(fields) == 1:
@@ -157,6 +213,13 @@ def _build_condition(
       /endswith    : suffix match
       /fullmatch   : exact match
       /partialmatch: substring match
+      /unmasked    : treat * and ? as literal characters (no CQL wildcards)
+      /regexp      : term is a raw MongoDB regex pattern (no escaping)
+
+    CQL masking (default, per LexFCS spec):
+      * → .* (zero or more characters)
+      ? → .  (exactly one character)
+      \\*, \\? → literal * or ?
 
     Note on whitespace tolerance: stored lemma values may carry leading or
     trailing whitespace that originates from the source XML (e.g. the BWB
@@ -174,22 +237,35 @@ def _build_condition(
         return term
 
     # Relation "=" — flexible matching
-    # Apply modifiers if present
+
+    # /regexp: term is a raw regex pattern, used as-is (no anchor wrapping)
+    if "regexp" in modifiers:
+        return {"$regex": term, "$options": "i"}
+
+    # Determine the regex pattern fragment from the search term.
+    # CQL default is "masked": * → .*, ? → .
+    # /unmasked overrides: all characters are literal.
+    if "unmasked" in modifiers:
+        pfrag = re.escape(term)
+    else:
+        pfrag = _mask_to_regex(term)
+
+    # Apply match-type modifiers if present
     if "fullmatch" in modifiers:
         # Case-insensitive exact match, tolerant of surrounding whitespace in
         # stored values.
-        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
+        return {"$regex": rf"^\s*{pfrag}\s*$", "$options": "i"}
 
     if "startswith" in modifiers:
         # Allow optional leading whitespace in the stored value.
-        return {"$regex": rf"^\s*{re.escape(term)}", "$options": "i"}
+        return {"$regex": rf"^\s*{pfrag}", "$options": "i"}
 
     if "endswith" in modifiers:
         # Allow optional trailing whitespace in the stored value.
-        return {"$regex": rf"{re.escape(term)}\s*$", "$options": "i"}
+        return {"$regex": rf"{pfrag}\s*$", "$options": "i"}
 
     if "contains" in modifiers or "partialmatch" in modifiers:
-        return {"$regex": re.escape(term), "$options": "i"}
+        return {"$regex": pfrag, "$options": "i"}
 
     # Default "=" behavior: flexible, beginner-friendly matching
     # For lemma: case-insensitive match (full or prefix)
@@ -198,19 +274,19 @@ def _build_condition(
     if index in ("lemma",):
         # Match full lemma, case-insensitive, tolerant of surrounding whitespace
         # in stored values (e.g. "Brot " from <lemma>Brot </lemma>).
-        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
+        return {"$regex": rf"^\s*{pfrag}\s*$", "$options": "i"}
     elif index in ("pos",):
         # Case-insensitive exact match for POS
-        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
+        return {"$regex": rf"^\s*{pfrag}\s*$", "$options": "i"}
     elif index in ("definition", "def", "etymology", "citation"):
         # Substring match for text fields
-        return {"$regex": re.escape(term), "$options": "i"}
+        return {"$regex": pfrag, "$options": "i"}
     elif index in ("entryId",):
         # Exact match for IDs
         return term
     else:
         # Fallback: case-insensitive substring
-        return {"$regex": re.escape(term), "$options": "i"}
+        return {"$regex": pfrag, "$options": "i"}
 
 
 def _build_paren_aware_condition(term: str, field: str) -> dict:
