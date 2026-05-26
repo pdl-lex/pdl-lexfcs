@@ -11,6 +11,15 @@ Field mapping (LexCQL index -> MongoDB field):
   etymology  -> etym.text
   citation   -> flatSenses.cit.text
   related    -> compounds.text, derivations.text
+
+Parenthesis notation in stored lemma fields:
+  Both headword.lemma and variants may store "(x)" to denote an optional
+  character, e.g. "Wind(s)braut".  For default lemma searches (relation "=",
+  no modifiers) we therefore add $expr/$regexMatch conditions alongside the
+  standard $regex conditions.  These treat stored "(x)" as "(?:x)?" so that
+  both "Windbraut" and "Windsbraut" match the stored value "Wind(s)braut".
+
+  Requires MongoDB 4.4+ ($replaceAll).
 """
 
 from cql_parser import SearchClause, BooleanQuery
@@ -113,7 +122,18 @@ def _build_search_clause(clause: SearchClause) -> dict:
     # Build the match condition based on relation and modifiers
     condition = _build_condition(term, relation, modifiers, index)
 
-    # If multiple fields, combine with $or
+    # For default lemma searches, headword.lemma and variants may contain stored
+    # "(x)" notation meaning x is optional, e.g. "Wind(s)braut".
+    # Add $expr conditions alongside the standard $regex ones so that both
+    # "Windbraut" and "Windsbraut" find the stored value "Wind(s)braut".
+    # Only applies to relation "=" without modifiers (the default flexible search).
+    if index == "lemma" and relation == "=" and not modifiers:
+        field_conditions = [{f: condition} for f in fields]
+        for f in fields:
+            field_conditions.append(_build_paren_aware_condition(term, f"${f}"))
+        return {"$or": field_conditions}
+
+    # Standard case: apply condition to all mapped fields
     if len(fields) == 1:
         return {fields[0]: condition}
     else:
@@ -181,3 +201,82 @@ def _build_condition(
     else:
         # Fallback: case-insensitive substring
         return {"$regex": re.escape(term), "$options": "i"}
+
+
+def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
+    """
+    Build a MongoDB $expr condition that matches entries where a stored field
+    value, interpreted as a pattern with "(x)" meaning x is optional, matches
+    the search term.
+
+    Example:  stored headword.lemma = "Wind(s)braut"
+              → pattern  "^Wind(?:s)?braut$"
+              → matches  "Windbraut"  ✓   and  "Windsbraut"  ✓
+
+    Works for both string fields (headword.lemma) and array fields (variants):
+    for arrays it checks whether ANY element matches.
+
+    Implementation: use $replaceAll to convert "(" → "(?:" and ")" → ")?" in
+    the stored value, then check the search term against that PCRE pattern via
+    $regexMatch.  Requires MongoDB 4.4+ ($replaceAll).
+
+    Args:
+        term:      the user's search term (constant string in the query)
+        field_ref: MongoDB expression for the field, e.g. "$headword.lemma"
+    """
+
+    def _match_one(value_expr) -> dict:
+        """$regexMatch: does `term` match the pattern derived from value_expr?"""
+        return {
+            "$regexMatch": {
+                "input": term,
+                "regex": {
+                    "$concat": [
+                        "^",
+                        {
+                            "$replaceAll": {
+                                "input": {
+                                    "$replaceAll": {
+                                        "input": value_expr,
+                                        "find": "(",
+                                        "replacement": "(?:",
+                                    }
+                                },
+                                "find": ")",
+                                "replacement": ")?",
+                            }
+                        },
+                        "$",
+                    ]
+                },
+                "options": "i",
+            }
+        }
+
+    # For array fields: match if any element satisfies the condition.
+    # For string fields: match directly.
+    match_condition = {
+        "$cond": {
+            "if": {"$isArray": field_ref},
+            "then": {
+                "$anyElementTrue": {
+                    "$map": {
+                        "input": field_ref,
+                        "as": "item",
+                        "in": _match_one("$$item"),
+                    }
+                }
+            },
+            "else": _match_one(field_ref),
+        }
+    }
+
+    return {
+        "$expr": {
+            "$and": [
+                # Guard: only evaluate if field exists and is non-null
+                {"$gt": [field_ref, None]},
+                match_condition,
+            ]
+        }
+    }

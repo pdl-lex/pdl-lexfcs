@@ -1,5 +1,5 @@
 """
-LexFCS Endpoint for BDO (Bayerisches Dialektwörterbuch Online)
+LexFCS Endpoint for BDO (Bayerns Dialekte Online)
 FastAPI-based SRU/FCS endpoint implementing the LexFCS specification v0.3.
 
 Serves three lexical resources:
@@ -15,7 +15,12 @@ from contextlib import asynccontextmanager
 from typing import Optional
 import os
 
-from sru_response import SRUExplainResponse, SRUSearchRetrieveResponse, SRUScanResponse, SRUDiagnostic
+from sru_response import (
+    SRUExplainResponse,
+    SRUSearchRetrieveResponse,
+    SRUScanResponse,
+    SRUDiagnostic,
+)
 from cql_parser import parse_cql
 from mongo_query import cql_to_mongo_query, UnsupportedIndexError
 
@@ -51,8 +56,8 @@ RESOURCES = {
         "pid": f"{BASE_URL}/dibs",
         "title_de": "Dialektologisches Informationssystem von Bayerisch-Schwaben (DIBS)",
         "title_en": "Dialectological Information System of Bavarian Swabia (DIBS)",
-        "description_de": "Dialektwörterbuch für Bayerisch-Schwaben",
-        "description_en": "Dialect dictionary for Bavarian Swabia",
+        "description_de": "Dialektologisches Informationssystem von Bayerisch-Schwaben (DIBS) der Bayerischen Akademie der Wissenschaften",
+        "description_en": "Dialectological Information System of Bavarian Swabia (DIBS) of the Bavarian Academy of Sciences and Humanities",
         "landing_page": "https://dibs.badw.de/",
         "languages": ["deu"],
     },
@@ -72,6 +77,7 @@ SUPPORTED_LEX_FIELDS = [
 # ---------------------------------------------------------------------------
 # Application lifecycle
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -93,13 +99,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="BDO LexFCS Endpoint",
-    description="LexFCS endpoint for the Bayerisches Dialektwörterbuch Online",
+    description="LexFCS endpoint for Bayerns Dialekte Online (BDO), serving the BWB, WBF, and DIBS lexical resources.",
     lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
 # SRU Endpoint
 # ---------------------------------------------------------------------------
+
 
 @app.get("/", response_class=Response)
 @app.head("/")
@@ -133,26 +140,32 @@ async def sru_endpoint(
             try:
                 int(maximumTerms)
             except (ValueError, TypeError):
-                diagnostics.append(SRUDiagnostic(
-                    uri="info:srw/diagnostic/1/6",
-                    details="maximumTerms",
-                    message="Unsupported parameter value",
-                ))
+                diagnostics.append(
+                    SRUDiagnostic(
+                        uri="info:srw/diagnostic/1/6",
+                        details="maximumTerms",
+                        message="Unsupported parameter value",
+                    )
+                )
         if responsePosition is not None:
             try:
                 int(responsePosition)
             except (ValueError, TypeError):
-                diagnostics.append(SRUDiagnostic(
-                    uri="info:srw/diagnostic/1/6",
-                    details="responsePosition",
-                    message="Unsupported parameter value",
-                ))
+                diagnostics.append(
+                    SRUDiagnostic(
+                        uri="info:srw/diagnostic/1/6",
+                        details="responsePosition",
+                        message="Unsupported parameter value",
+                    )
+                )
         if not diagnostics:
-            diagnostics.append(SRUDiagnostic(
-                uri="info:srw/diagnostic/1/4",
-                details="scan",
-                message="Unsupported operation",
-            ))
+            diagnostics.append(
+                SRUDiagnostic(
+                    uri="info:srw/diagnostic/1/4",
+                    details="scan",
+                    message="Unsupported operation",
+                )
+            )
         xml = SRUScanResponse(diagnostics=diagnostics).to_xml()
         return _xml_response(xml, x_indent_response)
 
@@ -249,6 +262,7 @@ async def sru_endpoint(
 # Explain operation
 # ---------------------------------------------------------------------------
 
+
 async def handle_explain(
     request: Request,
     version: str,
@@ -257,8 +271,7 @@ async def handle_explain(
 ):
     """Handle the SRU explain operation."""
     include_ed = (
-        x_fcs_endpoint_description
-        and x_fcs_endpoint_description.lower() == "true"
+        x_fcs_endpoint_description and x_fcs_endpoint_description.lower() == "true"
     )
 
     response = SRUExplainResponse(
@@ -273,6 +286,7 @@ async def handle_explain(
 # searchRetrieve operation
 # ---------------------------------------------------------------------------
 
+
 async def handle_search_retrieve(
     request: Request,
     version: str,
@@ -284,7 +298,7 @@ async def handle_search_retrieve(
     x_indent_response: Optional[str],
 ):
     """Handle the SRU searchRetrieve operation."""
-    
+
     if not query:
         diag = SRUDiagnostic(
             uri="info:srw/diagnostic/1/7",
@@ -335,7 +349,7 @@ async def handle_search_retrieve(
 
     # Execute query
     collection = request.app.state.entries
-    
+
     total_count = await collection.count_documents(mongo_filter)
 
     # Check if startRecord is beyond the result set
@@ -374,11 +388,13 @@ async def handle_search_retrieve(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _xml_response(xml_str: str, indent: Optional[str] = None) -> Response:
     """Return an XML response, optionally pretty-printed."""
     if indent and indent.strip():
         try:
             from lxml import etree
+
             tree = etree.fromstring(xml_str.encode("utf-8"))
             xml_str = etree.tostring(
                 tree, pretty_print=True, xml_declaration=True, encoding="UTF-8"
