@@ -15,6 +15,33 @@ from xml.sax.saxutils import escape as xml_escape
 
 
 # ---------------------------------------------------------------------------
+# Homograph index helper
+# ---------------------------------------------------------------------------
+
+_SUPERSCRIPT_TRANS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
+def _display_lemma(entry: dict) -> str:
+    """Return the lemma with a Unicode superscript homograph index, if present.
+
+    The stored ``headword.lemma`` value never contains the index (it is kept
+    in the separate ``headword.index`` field so that searches are unaffected).
+    This function combines both for display purposes only.
+
+    Examples:
+      headword = {"lemma": "Auge", "index": 2}  →  "Auge²"
+      headword = {"lemma": "Auge", "index": null} →  "Auge"
+      headword = {"lemma": "Auge"}               →  "Auge"
+    """
+    hw = entry.get("headword") or {}
+    lemma = hw.get("lemma", "")
+    idx = hw.get("index")
+    if idx and isinstance(idx, int) and idx >= 1:
+        lemma = lemma + str(idx).translate(_SUPERSCRIPT_TRANS)
+    return lemma
+
+
+# ---------------------------------------------------------------------------
 # BDO search URL builder
 # ---------------------------------------------------------------------------
 
@@ -493,8 +520,9 @@ class SRUSearchRetrieveResponse:
 
     def _build_record(self, entry: dict, position: int) -> str:
         source = entry.get("source", "")
-        lemma = entry.get("headword", {}).get("lemma", "")
-        ref_url = build_bdo_ref_url(source, lemma)
+        # ref_url uses the plain lemma (without index) so the BDO search works
+        lemma_plain = (entry.get("headword") or {}).get("lemma", "")
+        ref_url = build_bdo_ref_url(source, lemma_plain)
 
         parts = [
             "    <sru:record>",
@@ -517,7 +545,7 @@ class SRUSearchRetrieveResponse:
 
     def _build_hits_dataview(self, entry: dict) -> str:
         """Build the mandatory Generic Hits Data View."""
-        lemma = entry.get("headword", {}).get("lemma", "")
+        lemma_display = _display_lemma(entry)
         defs = []
         for s in entry.get("flatSenses", entry.get("sense", [])):
             d = s.get("def", "")
@@ -530,7 +558,7 @@ class SRUSearchRetrieveResponse:
             '            <hits:Result xmlns:hits="'
             + NS["hits"]
             + '"><hits:Hit>'
-            + xml_escape(lemma)
+            + xml_escape(lemma_display)
             + "</hits:Hit> "
             + xml_escape(hit_text)
             + "</hits:Result>",
@@ -553,14 +581,14 @@ class SRUSearchRetrieveResponse:
             + '">',
         ]
 
-        # lemma (mandatory)
-        lemma = entry.get("headword", {}).get("lemma", "")
+        # lemma (mandatory) — include homograph index as Unicode superscript
+        lemma_display = _display_lemma(entry)
         parts.append('              <lex:Field type="lemma">')
         parts.append(
             '                <lex:Value xml:lang="'
             + lang_639
             + '">'
-            + xml_escape(lemma)
+            + xml_escape(lemma_display)
             + "</lex:Value>"
         )
         for variant in entry.get("variants", []):
