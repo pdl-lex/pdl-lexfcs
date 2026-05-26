@@ -661,17 +661,18 @@ class SRUSearchRetrieveResponse:
                 )
             parts.append("              </lex:Field>")
 
-        # etymology — strip bibref spans, then signal words and trailing punctuation
+        # etymology — strip bibref and xmlattribute spans, then signal words and
+        # trailing punctuation
         etym = entry.get("etym")
         if etym and etym.get("text"):
             etym_text = etym["text"]
-            bibref_spans = [
+            strip_spans = [
                 (a.get("start", 0), a.get("end", 0))
                 for a in etym.get("annotations", [])
-                if a.get("type") == "bibref"
+                if a.get("type") in ("bibref", "xmlattribute")
             ]
-            if bibref_spans:
-                etym_text = _slice_out(etym_text, bibref_spans)
+            if strip_spans:
+                etym_text = _slice_out(etym_text, strip_spans)
             etym_text = _strip_signal_words(_normalize_ws(etym_text))
             etym_text = etym_text.rstrip(";., ") or None
             if etym_text:
