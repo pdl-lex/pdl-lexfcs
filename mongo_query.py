@@ -226,7 +226,13 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
     """
 
     def _match_one(value_expr) -> dict:
-        """$regexMatch: does `term` match the pattern derived from value_expr?"""
+        """$regexMatch: does `term` match the pattern derived from value_expr?
+
+        $ifNull ensures that missing/null field values produce a harmless
+        pattern ("^$") rather than propagating null into $concat, which would
+        make $regexMatch error out.
+        """
+        safe_expr = {"$ifNull": [value_expr, ""]}
         return {
             "$regexMatch": {
                 "input": term,
@@ -237,7 +243,7 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
                             "$replaceAll": {
                                 "input": {
                                     "$replaceAll": {
-                                        "input": value_expr,
+                                        "input": safe_expr,
                                         "find": "(",
                                         "replacement": "(?:",
                                     }
@@ -255,17 +261,20 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
 
     # For array fields: match if any element satisfies the condition.
     # For string fields: match directly.
+    # $anyElementTrue requires its argument wrapped in [ ] in older MongoDB.
     match_condition = {
         "$cond": {
             "if": {"$isArray": field_ref},
             "then": {
-                "$anyElementTrue": {
-                    "$map": {
-                        "input": field_ref,
-                        "as": "item",
-                        "in": _match_one("$$item"),
+                "$anyElementTrue": [
+                    {
+                        "$map": {
+                            "input": field_ref,
+                            "as": "item",
+                            "in": _match_one("$$item"),
+                        }
                     }
-                }
+                ]
             },
             "else": _match_one(field_ref),
         }
@@ -274,7 +283,9 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
     return {
         "$expr": {
             "$and": [
-                # Guard: only evaluate if field exists and is non-null
+                # Quick pre-filter: skip documents where the field is absent/null.
+                # $replaceAll/$regexMatch handle null safely via $ifNull above,
+                # but this avoids unnecessary work on the majority of documents.
                 {"$gt": [field_ref, None]},
                 match_condition,
             ]

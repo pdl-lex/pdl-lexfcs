@@ -1,6 +1,6 @@
 # LexFCS Endpoint für das BDO
 
-LexFCS-Endpoint für das **Bayerische Dialektwörterbuch Online (BDO)**.
+LexFCS-Endpoint für **Bayerns Dialekte Online** (BDO)**.
 Implementiert die [LexFCS-Spezifikation v0.3](https://github.com/textplus/LexFCS)
 als Python/FastAPI-Anwendung mit MongoDB als Datenquelle.
 

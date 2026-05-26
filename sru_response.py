@@ -115,7 +115,9 @@ def extract_citation_parts(cit: dict) -> dict:
         gloss_raw = _slice_out(text, italic_spans + bibref_spans)
         gloss_text = _strip_signal_words(_normalize_ws(gloss_raw)) or None
 
-    full_cleaned = _strip_signal_words(_normalize_ws(_slice_out(text, bibref_spans))) or None
+    full_cleaned = (
+        _strip_signal_words(_normalize_ws(_slice_out(text, bibref_spans))) or None
+    )
 
     return {
         "italic_text": italic_text,
@@ -176,6 +178,7 @@ _CLOSE_NAME = "</" + "name>"
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SRUDiagnostic:
     uri: str
@@ -186,6 +189,7 @@ class SRUDiagnostic:
 # ---------------------------------------------------------------------------
 # Explain Response
 # ---------------------------------------------------------------------------
+
 
 class SRUExplainResponse:
     """Builds the SRU explain response XML."""
@@ -245,8 +249,7 @@ class SRUExplainResponse:
             index_lines.append("          <index>")
             index_lines.append("            <title>" + title + "</title>")
             index_lines.append(
-                '            <map><name set="lexres">'
-                + idx + _CLOSE_NAME + "</map>"
+                '            <map><name set="lexres">' + idx + _CLOSE_NAME + "</map>"
             )
             index_lines.append("          </index>")
         index_xml = "\n".join(index_lines)
@@ -261,9 +264,8 @@ class SRUExplainResponse:
             "        </serverInfo>",
             "        <databaseInfo>",
             '          <title lang="de" primary="true">'
-            + "Bayerisches Dialektw\u00f6rterbuch Online (BDO)</title>",
-            '          <title lang="en">'
-            + "Bavarian Dialect Dictionary Online (BDO)</title>",
+            + "Bayerns Dialekte Online (BDO)</title>",
+            '          <title lang="en">' + "Bavarian Dialects Online (BDO)</title>",
             '          <description lang="de" primary="true">',
             "            Bayerische Dialektw\u00f6rterb\u00fccher: BWB, WBF und DIBS",
             "          </description>",
@@ -305,47 +307,50 @@ class SRUExplainResponse:
             parts.append("      <ed:SupportedLexFields>")
             for f in self.supported_lex_fields:
                 parts.append(
-                    '        <ed:SupportedLexField id="' + f + '">'
-                    + f + "</ed:SupportedLexField>"
+                    '        <ed:SupportedLexField id="'
+                    + f
+                    + '">'
+                    + f
+                    + "</ed:SupportedLexField>"
                 )
             parts.append("      </ed:SupportedLexFields>")
 
         parts.append("      <ed:Resources>")
         for key, res in self.resources.items():
             lex_field_refs = " ".join(self.supported_lex_fields or [])
-            parts.append(
-                '        <ed:Resource pid="' + xml_escape(res["pid"]) + '">'
-            )
+            parts.append('        <ed:Resource pid="' + xml_escape(res["pid"]) + '">')
             parts.append(
                 '          <ed:Title xml:lang="de">'
-                + xml_escape(res["title_de"]) + "</ed:Title>"
+                + xml_escape(res["title_de"])
+                + "</ed:Title>"
             )
             parts.append(
                 '          <ed:Title xml:lang="en">'
-                + xml_escape(res["title_en"]) + "</ed:Title>"
+                + xml_escape(res["title_en"])
+                + "</ed:Title>"
             )
             parts.append(
                 '          <ed:Description xml:lang="de">'
-                + xml_escape(res["description_de"]) + "</ed:Description>"
+                + xml_escape(res["description_de"])
+                + "</ed:Description>"
             )
             parts.append(
                 '          <ed:Description xml:lang="en">'
-                + xml_escape(res["description_en"]) + "</ed:Description>"
+                + xml_escape(res["description_en"])
+                + "</ed:Description>"
             )
             parts.append(
                 "          <ed:LandingPageURI>"
-                + xml_escape(res["landing_page"]) + "</ed:LandingPageURI>"
+                + xml_escape(res["landing_page"])
+                + "</ed:LandingPageURI>"
             )
             parts.append("          <ed:Languages>")
             for lang in res["languages"]:
-                parts.append(
-                    "            <ed:Language>" + lang + "</ed:Language>"
-                )
+                parts.append("            <ed:Language>" + lang + "</ed:Language>")
             parts.append("          </ed:Languages>")
             parts.append('          <ed:AvailableDataViews ref="hits lex" />')
             parts.append(
-                '          <ed:AvailableLexFields ref="'
-                + lex_field_refs + '" />'
+                '          <ed:AvailableLexFields ref="' + lex_field_refs + '" />'
             )
             parts.append("        </ed:Resource>")
         parts.append("      </ed:Resources>")
@@ -367,6 +372,7 @@ class SRUExplainResponse:
 # Scan Response (unsupported, diagnostics only)
 # ---------------------------------------------------------------------------
 
+
 class SRUScanResponse:
     """Builds a minimal SRU scanResponse XML (for returning diagnostics)."""
 
@@ -384,19 +390,17 @@ class SRUScanResponse:
         if self.diagnostics:
             parts.append("  <scan:diagnostics>")
             for diag in self.diagnostics:
-                parts.append(
-                    '    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">'
-                )
-                parts.append(
-                    "      <diag:uri>" + xml_escape(diag.uri) + "</diag:uri>"
-                )
+                parts.append('    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">')
+                parts.append("      <diag:uri>" + xml_escape(diag.uri) + "</diag:uri>")
                 parts.append(
                     "      <diag:details>"
-                    + xml_escape(diag.details) + "</diag:details>"
+                    + xml_escape(diag.details)
+                    + "</diag:details>"
                 )
                 parts.append(
                     "      <diag:message>"
-                    + xml_escape(diag.message) + "</diag:message>"
+                    + xml_escape(diag.message)
+                    + "</diag:message>"
                 )
                 parts.append("    </diag:diagnostic>")
             parts.append("  </scan:diagnostics>")
@@ -408,6 +412,7 @@ class SRUScanResponse:
 # ---------------------------------------------------------------------------
 # Sense tree helpers
 # ---------------------------------------------------------------------------
+
 
 def _collect_senses(sense_list: list) -> list[tuple[dict, dict | None]]:
     """DFS over nested sense tree; returns [(sense, parent_sense_or_None), ...]."""
@@ -425,6 +430,7 @@ def _collect_senses(sense_list: list) -> list[tuple[dict, dict | None]]:
 # ---------------------------------------------------------------------------
 # searchRetrieve Response
 # ---------------------------------------------------------------------------
+
 
 class SRUSearchRetrieveResponse:
     """Builds the SRU searchRetrieve response XML."""
@@ -453,7 +459,8 @@ class SRUSearchRetrieveResponse:
             '<sru:searchRetrieveResponse xmlns:sru="' + NS["sru"] + '">',
             "  <sru:version>2.0</sru:version>",
             "  <sru:numberOfRecords>"
-            + str(self.total_count) + "</sru:numberOfRecords>",
+            + str(self.total_count)
+            + "</sru:numberOfRecords>",
         ]
 
         if self.entries:
@@ -466,19 +473,17 @@ class SRUSearchRetrieveResponse:
         if self.diagnostics:
             parts.append("  <sru:diagnostics>")
             for diag in self.diagnostics:
-                parts.append(
-                    '    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">'
-                )
-                parts.append(
-                    "      <diag:uri>" + xml_escape(diag.uri) + "</diag:uri>"
-                )
+                parts.append('    <diag:diagnostic xmlns:diag="' + NS["diag"] + '">')
+                parts.append("      <diag:uri>" + xml_escape(diag.uri) + "</diag:uri>")
                 parts.append(
                     "      <diag:details>"
-                    + xml_escape(diag.details) + "</diag:details>"
+                    + xml_escape(diag.details)
+                    + "</diag:details>"
                 )
                 parts.append(
                     "      <diag:message>"
-                    + xml_escape(diag.message) + "</diag:message>"
+                    + xml_escape(diag.message)
+                    + "</diag:message>"
                 )
                 parts.append("    </diag:diagnostic>")
             parts.append("  </sru:diagnostics>")
@@ -496,8 +501,11 @@ class SRUSearchRetrieveResponse:
             "      <sru:recordSchema>http://clarin.eu/fcs/resource</sru:recordSchema>",
             "      <sru:recordXMLEscaping>xml</sru:recordXMLEscaping>",
             "      <sru:recordData>",
-            '        <fcs:Resource xmlns:fcs="' + NS["fcs"]
-            + '" ref="' + xml_escape(ref_url) + '">',
+            '        <fcs:Resource xmlns:fcs="'
+            + NS["fcs"]
+            + '" ref="'
+            + xml_escape(ref_url)
+            + '">',
             self._build_hits_dataview(entry),
             self._build_lex_dataview(entry, position),
             "        </fcs:Resource>",
@@ -519,9 +527,13 @@ class SRUSearchRetrieveResponse:
 
         lines = [
             '          <fcs:DataView type="application/x-clarin-fcs-hits+xml">',
-            '            <hits:Result xmlns:hits="' + NS["hits"]
-            + '"><hits:Hit>' + xml_escape(lemma)
-            + "</hits:Hit> " + xml_escape(hit_text) + "</hits:Result>",
+            '            <hits:Result xmlns:hits="'
+            + NS["hits"]
+            + '"><hits:Hit>'
+            + xml_escape(lemma)
+            + "</hits:Hit> "
+            + xml_escape(hit_text)
+            + "</hits:Result>",
             "          </fcs:DataView>",
         ]
         return "\n".join(lines)
@@ -534,22 +546,31 @@ class SRUSearchRetrieveResponse:
 
         parts = [
             '          <fcs:DataView type="application/x-clarin-fcs-lex+xml">',
-            '            <lex:Entry xmlns:lex="' + NS["lex"]
-            + '" xml:lang="' + lang_639 + '">',
+            '            <lex:Entry xmlns:lex="'
+            + NS["lex"]
+            + '" xml:lang="'
+            + lang_639
+            + '">',
         ]
 
         # lemma (mandatory)
         lemma = entry.get("headword", {}).get("lemma", "")
         parts.append('              <lex:Field type="lemma">')
         parts.append(
-            '                <lex:Value xml:lang="' + lang_639 + '">'
-            + xml_escape(lemma) + "</lex:Value>"
+            '                <lex:Value xml:lang="'
+            + lang_639
+            + '">'
+            + xml_escape(lemma)
+            + "</lex:Value>"
         )
         for variant in entry.get("variants", []):
             if variant:
                 parts.append(
-                    '                <lex:Value xml:lang="' + lang_639 + '">'
-                    + xml_escape(variant) + "</lex:Value>"
+                    '                <lex:Value xml:lang="'
+                    + lang_639
+                    + '">'
+                    + xml_escape(variant)
+                    + "</lex:Value>"
                 )
         parts.append("              </lex:Field>")
 
@@ -558,8 +579,7 @@ class SRUSearchRetrieveResponse:
         if source_id:
             parts.append('              <lex:Field type="entryId">')
             parts.append(
-                "                <lex:Value>"
-                + xml_escape(source_id) + "</lex:Value>"
+                "                <lex:Value>" + xml_escape(source_id) + "</lex:Value>"
             )
             parts.append("              </lex:Field>")
 
@@ -568,8 +588,7 @@ class SRUSearchRetrieveResponse:
         if pos:
             parts.append('              <lex:Field type="pos">')
             parts.append(
-                "                <lex:Value>"
-                + xml_escape(pos) + "</lex:Value>"
+                "                <lex:Value>" + xml_escape(pos) + "</lex:Value>"
             )
             parts.append("              </lex:Field>")
 
@@ -628,8 +647,11 @@ class SRUSearchRetrieveResponse:
                 if si in parent_def_id:
                     attrs += ' idRefs="' + parent_def_id[si] + '"'
                 parts.append(
-                    '                <lex:Value' + attrs + ">"
-                    + xml_escape(sense["def"]) + "</lex:Value>"
+                    "                <lex:Value"
+                    + attrs
+                    + ">"
+                    + xml_escape(sense["def"])
+                    + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")
 
@@ -638,8 +660,11 @@ class SRUSearchRetrieveResponse:
         if etym and etym.get("text"):
             parts.append('              <lex:Field type="etymology">')
             parts.append(
-                '                <lex:Value xml:lang="' + lang_639 + '">'
-                + xml_escape(etym["text"]) + "</lex:Value>"
+                '                <lex:Value xml:lang="'
+                + lang_639
+                + '">'
+                + xml_escape(etym["text"])
+                + "</lex:Value>"
             )
             parts.append("              </lex:Field>")
 
@@ -656,13 +681,13 @@ class SRUSearchRetrieveResponse:
                 if target_id:
                     attrs += ' idRefs="' + target_id + '"'
                 if cp["sources"]:
-                    attrs += (
-                        ' source="'
-                        + xml_escape("; ".join(cp["sources"])) + '"'
-                    )
+                    attrs += ' source="' + xml_escape("; ".join(cp["sources"])) + '"'
                 parts.append(
-                    '                <lex:Value' + attrs + ">"
-                    + xml_escape(cit_text) + "</lex:Value>"
+                    "                <lex:Value"
+                    + attrs
+                    + ">"
+                    + xml_escape(cit_text)
+                    + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")
 
@@ -680,8 +705,11 @@ class SRUSearchRetrieveResponse:
             parts.append('              <lex:Field type="related">')
             for r in related:
                 parts.append(
-                    '                <lex:Value xml:lang="' + lang_639 + '">'
-                    + xml_escape(r) + "</lex:Value>"
+                    '                <lex:Value xml:lang="'
+                    + lang_639
+                    + '">'
+                    + xml_escape(r)
+                    + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")
 

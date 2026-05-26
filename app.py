@@ -9,7 +9,7 @@ Serves three lexical resources:
 """
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -259,6 +259,115 @@ async def sru_endpoint(
 
 
 # ---------------------------------------------------------------------------
+# Debug UI
+# ---------------------------------------------------------------------------
+
+_DEBUG_HTML = """\
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LexFCS Debug</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    body {{ font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto;
+            padding: 0 1rem; color: #222; }}
+    h1 {{ font-size: 1.4rem; margin-bottom: 1rem; }}
+    .row {{ display: flex; gap: .5rem; margin-bottom: .75rem; flex-wrap: wrap; }}
+    input[type=text] {{ flex: 1; min-width: 200px; padding: .4rem .6rem;
+                        font-size: 1rem; border: 1px solid #bbb; border-radius: 4px; }}
+    select, input[type=number] {{ padding: .4rem .6rem; font-size: 1rem;
+                                   border: 1px solid #bbb; border-radius: 4px; }}
+    button {{ padding: .4rem 1.1rem; font-size: 1rem; background: #0066cc;
+              color: #fff; border: none; border-radius: 4px; cursor: pointer; }}
+    button:hover {{ background: #0052a3; }}
+    .url-line {{ font-family: monospace; font-size: .82rem; color: #555;
+                 word-break: break-all; margin-bottom: .5rem; }}
+    .url-line a {{ color: #0066cc; }}
+    .status {{ font-style: italic; color: #666; margin: .5rem 0; }}
+    .error  {{ color: #c00; font-weight: bold; }}
+    pre {{ background: #f6f6f6; border: 1px solid #ddd; border-radius: 4px;
+           padding: 1rem; overflow-x: auto; font-size: .78rem;
+           white-space: pre-wrap; word-break: break-all; max-height: 70vh;
+           overflow-y: auto; }}
+  </style>
+</head>
+<body>
+  <h1>LexFCS Endpoint — Debug</h1>
+  <div class="row">
+    <input type="text" id="lemma" placeholder='Lemma, z. B. Windsbraut  oder  lemma = "Wind*"' autofocus />
+    <select id="dict">
+      <option value="">Alle Wörterbücher</option>
+      <option value="bwb">BWB</option>
+      <option value="wbf">WBF</option>
+      <option value="dibs">DIBS</option>
+    </select>
+    <input type="number" id="maxRec" value="5" min="1" max="50"
+           title="maximumRecords" style="width:5rem">
+    <button onclick="doSearch()">Suchen</button>
+  </div>
+  <div id="urlLine" class="url-line"></div>
+  <div id="result"></div>
+
+  <script>
+    const BASE = "{base_url}";
+
+    async function doSearch() {{
+      const lemma = document.getElementById("lemma").value.trim();
+      if (!lemma) return;
+      const dict   = document.getElementById("dict").value;
+      const maxRec = document.getElementById("maxRec").value;
+
+      const p = new URLSearchParams({{
+        operation: "searchRetrieve",
+        query: lemma,
+        maximumRecords: maxRec,
+        "x-indent-response": "1",
+      }});
+      if (dict) p.set("x-fcs-context", BASE + "/" + dict);
+
+      const url    = "/?" + p.toString();
+      const absUrl = location.origin + url;
+
+      document.getElementById("urlLine").innerHTML =
+        "URL: <a href=\\"" + absUrl + "\\" target=\\"_blank\\">" + absUrl + "</a>";
+      document.getElementById("result").innerHTML =
+        "<p class=\\"status\\">Laden…</p>";
+
+      try {{
+        const resp = await fetch(url);
+        const text = await resp.text();
+        const cls  = resp.ok ? "" : " error";
+        document.getElementById("result").innerHTML =
+          "<p class=\\"status" + cls + "\\">HTTP " + resp.status + " " +
+          resp.statusText + "</p><pre>" + esc(text) + "</pre>";
+      }} catch (e) {{
+        document.getElementById("result").innerHTML =
+          "<p class=\\"error\\">Netzwerkfehler: " + e + "</p>";
+      }}
+    }}
+
+    function esc(s) {{
+      return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }}
+
+    document.getElementById("lemma").addEventListener("keydown", e => {{
+      if (e.key === "Enter") doSearch();
+    }});
+  </script>
+</body>
+</html>
+"""
+
+
+@app.get("/debug", response_class=HTMLResponse)
+async def debug_ui():
+    """Simple browser-based test UI for the SRU/LexFCS endpoint."""
+    return HTMLResponse(_DEBUG_HTML.format(base_url=BASE_URL))
+
+
+# ---------------------------------------------------------------------------
 # Explain operation
 # ---------------------------------------------------------------------------
 
@@ -350,7 +459,16 @@ async def handle_search_retrieve(
     # Execute query
     collection = request.app.state.entries
 
-    total_count = await collection.count_documents(mongo_filter)
+    try:
+        total_count = await collection.count_documents(mongo_filter)
+    except Exception as e:
+        diag = SRUDiagnostic(
+            uri="info:srw/diagnostic/1/47",
+            details=str(e),
+            message="Cannot process query; reason unknown",
+        )
+        xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+        return _xml_response(xml, x_indent_response)
 
     # Check if startRecord is beyond the result set
     if start_record > 1 and (total_count == 0 or start_record > total_count):
@@ -365,12 +483,21 @@ async def handle_search_retrieve(
         ).to_xml()
         return _xml_response(xml, x_indent_response)
 
-    cursor = (
-        collection.find(mongo_filter)
-        .skip(start_record - 1)  # SRU is 1-based
-        .limit(maximum_records)
-    )
-    entries = await cursor.to_list(length=maximum_records)
+    try:
+        cursor = (
+            collection.find(mongo_filter)
+            .skip(start_record - 1)  # SRU is 1-based
+            .limit(maximum_records)
+        )
+        entries = await cursor.to_list(length=maximum_records)
+    except Exception as e:
+        diag = SRUDiagnostic(
+            uri="info:srw/diagnostic/1/47",
+            details=str(e),
+            message="Cannot process query; reason unknown",
+        )
+        xml = SRUSearchRetrieveResponse(diagnostics=[diag]).to_xml()
+        return _xml_response(xml, x_indent_response)
 
     # Build response
     response = SRUSearchRetrieveResponse(
