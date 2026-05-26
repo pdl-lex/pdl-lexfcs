@@ -112,14 +112,12 @@ def extract_citation_parts(cit: dict) -> dict:
         that LexFCS expects to be linked back to a definition via ``@idRefs``)
       - ``full_cleaned``: full text minus bibref spans (fallback when there's
         no italic span)
-      - ``sources``: bibref names for use in ``@source``
     """
     text = cit.get("text", "") or ""
     annotations = cit.get("annotations", [])
 
     italic_spans: list[tuple[int, int]] = []
     bibref_spans: list[tuple[int, int]] = []
-    sources: list[str] = []
     for a in annotations:
         start = a.get("start", 0)
         end = a.get("end", 0)
@@ -128,9 +126,6 @@ def extract_citation_parts(cit: dict) -> dict:
             italic_spans.append((start, end))
         elif atype == "bibref":
             bibref_spans.append((start, end))
-            src = (a.get("text", "") or "").strip()
-            if src:
-                sources.append(src)
 
     italic_text = None
     if italic_spans:
@@ -150,37 +145,7 @@ def extract_citation_parts(cit: dict) -> dict:
         "italic_text": italic_text,
         "gloss_text": gloss_text,
         "full_cleaned": full_cleaned,
-        "sources": sources,
     }
-
-
-def extract_etym_parts(etym: dict) -> dict:
-    """Strip bibrefs from etymology text; filter signal words and punctuation remnants.
-
-    Returns a dict with:
-      - ``text``: cleaned etymology text, or ``None`` if nothing remains
-      - ``sources``: bibref strings for ``@source``
-    """
-    text = etym.get("text", "") or ""
-    annotations = etym.get("annotations", [])
-
-    bibref_spans: list[tuple[int, int]] = []
-    sources: list[str] = []
-    for a in annotations:
-        if a.get("type") == "bibref":
-            bibref_spans.append((a.get("start", 0), a.get("end", 0)))
-            src = (a.get("text", "") or "").strip()
-            if src:
-                sources.append(src)
-
-    if not bibref_spans:
-        return {"text": _normalize_ws(text) or None, "sources": []}
-
-    cleaned = _normalize_ws(_slice_out(text, bibref_spans))
-    cleaned = _strip_signal_words(cleaned)
-    cleaned = cleaned.rstrip(";., ") or None
-
-    return {"text": cleaned, "sources": sources}
 
 
 # ---------------------------------------------------------------------------
@@ -721,8 +686,6 @@ class SRUSearchRetrieveResponse:
                 attrs = ' xml:lang="' + lang_639 + '" type="example"'
                 if target_id:
                     attrs += ' idRefs="' + target_id + '"'
-                if cp["sources"]:
-                    attrs += ' source="' + xml_escape("; ".join(cp["sources"])) + '"'
                 parts.append(
                     "                <lex:Value"
                     + attrs
