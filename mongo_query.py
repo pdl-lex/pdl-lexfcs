@@ -145,18 +145,24 @@ def _build_condition(
 ) -> dict:
     """
     Build a MongoDB condition for a term, respecting relation and modifiers.
-    
+
     Relations:
       =  : flexible match (case-insensitive regex by default)
       == : exact match
       is : exact match (for URIs)
-    
+
     Modifiers:
       /contains    : substring match
       /startswith  : prefix match
       /endswith    : suffix match
       /fullmatch   : exact match
       /partialmatch: substring match
+
+    Note on whitespace tolerance: stored lemma values may carry leading or
+    trailing whitespace that originates from the source XML (e.g. the BWB
+    stores ``<lemma>Brot </lemma>`` with a trailing space).  All patterns
+    that use start/end anchors therefore include ``\\s*`` at the boundary so
+    that "Brot " is matched by a search for "Brot".
     """
 
     if relation == "==":
@@ -170,14 +176,17 @@ def _build_condition(
     # Relation "=" — flexible matching
     # Apply modifiers if present
     if "fullmatch" in modifiers:
-        # Case-insensitive exact match
-        return {"$regex": f"^{re.escape(term)}$", "$options": "i"}
+        # Case-insensitive exact match, tolerant of surrounding whitespace in
+        # stored values.
+        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
 
     if "startswith" in modifiers:
-        return {"$regex": f"^{re.escape(term)}", "$options": "i"}
+        # Allow optional leading whitespace in the stored value.
+        return {"$regex": rf"^\s*{re.escape(term)}", "$options": "i"}
 
     if "endswith" in modifiers:
-        return {"$regex": f"{re.escape(term)}$", "$options": "i"}
+        # Allow optional trailing whitespace in the stored value.
+        return {"$regex": rf"{re.escape(term)}\s*$", "$options": "i"}
 
     if "contains" in modifiers or "partialmatch" in modifiers:
         return {"$regex": re.escape(term), "$options": "i"}
@@ -187,11 +196,12 @@ def _build_condition(
     # For definition/citation: substring match
     # For pos: exact match (case-insensitive)
     if index in ("lemma",):
-        # Match full lemma, case-insensitive
-        return {"$regex": f"^{re.escape(term)}$", "$options": "i"}
+        # Match full lemma, case-insensitive, tolerant of surrounding whitespace
+        # in stored values (e.g. "Brot " from <lemma>Brot </lemma>).
+        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
     elif index in ("pos",):
         # Case-insensitive exact match for POS
-        return {"$regex": f"^{re.escape(term)}$", "$options": "i"}
+        return {"$regex": rf"^\s*{re.escape(term)}\s*$", "$options": "i"}
     elif index in ("definition", "def", "etymology", "citation"):
         # Substring match for text fields
         return {"$regex": re.escape(term), "$options": "i"}
@@ -247,5 +257,7 @@ def _build_paren_aware_condition(term: str, field: str) -> dict:
         # ① skip a stored "(x)" group not present in search term (non-greedy)
         # ② match c, which may itself be wrapped in "(c)" in the stored value
         parts.append(r'(?:\([^)]+\))??' + r'\(?' + ec + r'\)?')
-    pattern = '^' + ''.join(parts) + '$'
+    # Allow optional surrounding whitespace in the stored value so that e.g.
+    # "Brot " (from <lemma>Brot </lemma>) is matched by a search for "Brot".
+    pattern = r'^\s*' + ''.join(parts) + r'\s*$'
     return {field: {"$regex": pattern, "$options": "i"}}
