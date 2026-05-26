@@ -252,7 +252,7 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
                                 "replacement": ")?",
                             }
                         },
-                        "$",
+                        {"$literal": "$"},   # literal "$", not a field path
                     ]
                 },
                 "options": "i",
