@@ -420,7 +420,7 @@ async def _fetch_priority_sorted(
     if primary_take > 0:
         cursor = (
             collection.find(primary_filter)
-            .sort("headword.lemma", 1)
+            .sort([("headword.lemma", 1), ("headword.index", 1)])
             .skip(primary_skip)
             .limit(primary_take)
         )
@@ -429,7 +429,7 @@ async def _fetch_priority_sorted(
     if secondary_take > 0:
         cursor = (
             collection.find(secondary_filter)
-            .sort("headword.lemma", 1)
+            .sort([("headword.lemma", 1), ("headword.index", 1)])
             .skip(secondary_skip)
             .limit(secondary_take)
         )
@@ -577,7 +577,7 @@ async def handle_search_retrieve(
         else:
             cursor = (
                 collection.find(mongo_filter)
-                .sort("headword.lemma", 1)
+                .sort([("headword.lemma", 1), ("headword.index", 1)])
                 .skip(start_record - 1)  # SRU is 1-based
                 .limit(maximum_records)
             )
