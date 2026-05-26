@@ -679,7 +679,7 @@ class SRUSearchRetrieveResponse:
         if kept_cits:
             parts.append('              <lex:Field type="citation">')
             for si, ci, cp in kept_cits:
-                cit_text = cp["full_cleaned"] or cp["italic_text"]
+                cit_text = cp["italic_text"] or cp["full_cleaned"]
                 if not cit_text:
                     continue
                 target_id = sense_def_ids.get(si)
