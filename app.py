@@ -486,6 +486,7 @@ async def handle_search_retrieve(
     try:
         cursor = (
             collection.find(mongo_filter)
+            .sort("headword.lemma", 1)
             .skip(start_record - 1)  # SRU is 1-based
             .limit(maximum_records)
         )
