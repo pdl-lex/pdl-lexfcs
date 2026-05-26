@@ -22,6 +22,7 @@ lexfcs-endpoint/
 ├── sru_response.py     # XML-Generierung (Explain + SearchRetrieve)
 ├── cql_parser.py       # CQL/LexCQL-Parser (rekursiver Abstieg)
 ├── mongo_query.py      # CQL-AST → MongoDB-Query-Übersetzung
+├── pos_mapping.py      # POS-Mapping: Deutsch (DB) ↔ Englisch/UD (Ausgabe + Suche)
 ├── pyproject.toml      # Projektdefinition und Dependencies
 ├── Dockerfile
 ├── docker-compose.yml  # Verbindung zum bestehenden MongoDB-Container
@@ -38,7 +39,9 @@ MongoDB-Verbindung. Die App greift ausschließlich lesend auf die Datenbank zu.
 **`sru_response.py`** — Baut die XML-Antworten gemäß SRU 2.0, FCS Core 2.0
 und LexFCS v0.3. Zwei Klassen: `SRUExplainResponse` für die
 Selbstbeschreibung, `SRUSearchRetrieveResponse` für Suchergebnisse mit
-Hits Data View und Lexical Data View.
+Hits Data View und Lexical Data View. POS-Werte werden dabei von deutschen
+Quellbezeichnungen in englische/UD-Werte übersetzt und mit
+`@vocabRef`/`@vocabValueRef` annotiert.
 
 **`cql_parser.py`** — Zerlegt CQL-Query-Strings in einen Syntaxbaum (AST).
 Unterstützt Term-Queries, Index-Queries, Boolean-Operatoren und
@@ -46,6 +49,12 @@ Relation-Modifikatoren.
 
 **`mongo_query.py`** — Übersetzt den CQL-AST in MongoDB-Filterdokumente.
 Definiert das Mapping von LexFCS-Feldnamen auf MongoDB-Feldpfade.
+Bei `pos`-Suchen werden englische/UD-Werte automatisch auf die gespeicherten
+deutschen Bezeichnungen expandiert.
+
+**`pos_mapping.py`** — Zentrales POS-Vokabular-Mapping: deutsche DB-Werte
+↔ englische/UD-Ausgabewerte (16 Einträge), UD-`vocabValueRef`-URIs für
+11 UD-Tags, sowie die Rückwärts-Map für die Suche.
 
 ## Deployment
 
@@ -132,7 +141,7 @@ automatische Erweiterung auf Belegstellen:
 
     GET /?query=lemma = "Haus"
     GET /?query=definition = "Getreide"
-    GET /?query=pos = "Verb"
+    GET /?query=pos = "VERB"
 
 Verfügbare Felder:
 
@@ -140,7 +149,7 @@ Verfügbare Felder:
 |-------------|--------------|--------------|
 | `lemma` | Stichwort (Default) | `headword.lemma`, `variants` |
 | `definition` / `def` | Bedeutungserklärung | `flatSenses.def` |
-| `pos` | Wortart | `pos` |
+| `pos` | Wortart (englische/UD-Werte, s. u.) | `pos` |
 | `entryId` | Eintrags-ID | `sourceId` |
 | `etymology` | Herkunft | `etym.text` |
 | `citation` | Belegstelle | `flatSenses.cit.text` |
@@ -165,17 +174,43 @@ Verfügbare Felder:
 | `/endswith` | Suffix-Suche |
 | `/fullmatch` | Exakter Match (case-insensitive) |
 
+### POS-Vokabular
+
+Das `pos`-Feld verwendet englische Bezeichnungen, die sich weitgehend an den
+[Universal Dependencies](https://universaldependencies.org/u/pos/)-Tags orientieren:
+
+| Suchterm | Wortart |
+|----------|---------|
+| `NOUN` | Substantiv |
+| `VERB` | Verb |
+| `ADJ` | Adjektiv |
+| `ADV` | Adverb |
+| `ADP` | Präposition |
+| `DET` | Determinativ / Possessivum |
+| `PRON` | Pronomen |
+| `NUM` | Zahlwort |
+| `PART` | Partikel |
+| `INTJ` | Interjektion |
+| `CONJ` | Konjunktor |
+| `MWE` | Mehrwortausdruck |
+| `prefix` | Präfix |
+| `suffix` | Suffix |
+| `X` | Sonstige |
+
+Zur Abwärtskompatibilität werden auch die deutschen Bezeichnungen akzeptiert
+(`pos = "Substantiv"` ist gleichwertig mit `pos = "NOUN"`).
+
 ### Boolean-Operatoren
 
 Die Operatoren `AND`, `OR` und `NOT` lassen sich mit expliziten Feldern kombinieren:
 
-    GET /?query=pos = "Verb" AND definition = "essen"
+    GET /?query=pos = "VERB" AND definition = "essen"
     GET /?query=lemma = "Haus" OR lemma = "Hütte"
-    GET /?query=pos = "Substantiv" AND NOT definition = "Tier"
+    GET /?query=pos = "NOUN" AND NOT definition = "Tier"
 
 Klammern werden unterstützt:
 
-    GET /?query=(pos = "Verb" OR pos = "Substantiv") AND definition = "Wasser"
+    GET /?query=(pos = "VERB" OR pos = "NOUN") AND definition = "Wasser"
 
 **Freitextsuche in Belegstellen mit AND/OR**
 
@@ -216,7 +251,7 @@ curl 'http://localhost:8080/?x-fcs-endpoint-description=true&x-indent-response=2
 curl 'http://localhost:8080/?query=Haus&x-indent-response=2'
 
 # Alle Verben mit "essen" in der Definition, nur BWB
-curl 'http://localhost:8080/?query=pos+%3D+%22Verb%22+AND+definition+%3D+%22essen%22&x-fcs-context=bwb&x-indent-response=2'
+curl 'http://localhost:8080/?query=pos+%3D+%22VERB%22+AND+definition+%3D+%22essen%22&x-fcs-context=bwb&x-indent-response=2'
 
 # Einträge mit Etymologie-Verweis auf Althochdeutsch
 curl 'http://localhost:8080/?query=etymology+%3D+%22Ahd.%22&maximumRecords=5&x-indent-response=2'
@@ -225,7 +260,7 @@ curl 'http://localhost:8080/?query=etymology+%3D+%22Ahd.%22&maximumRecords=5&x-i
 curl 'http://localhost:8080/?query=lemma+%3D%2Fstartswith+%22Brot%22&x-indent-response=2'
 
 # Zweite Ergebnisseite (Treffer 26–50)
-curl 'http://localhost:8080/?query=pos+%3D+%22Substantiv%22&startRecord=26&maximumRecords=25'
+curl 'http://localhost:8080/?query=pos+%3D+%22NOUN%22&startRecord=26&maximumRecords=25'
 ```
 
 ## Antwortformat
@@ -239,6 +274,9 @@ und den ersten Definitionen. Pflicht laut FCS Core 2.0.
 mit `<lex:Entry>`, `<lex:Field>` und `<lex:Value>` Elementen.
 Enthält: Lemma + Varianten, Entry-ID, Wortart, alle Definitionen,
 Etymologie, Belegstellen (max. 10) und verwandte Wörter.
+POS-Werte werden als englische/UD-Tags ausgegeben und mit
+`@vocabRef="https://universaldependencies.org/u/pos"` und
+`@vocabValueRef` annotiert (wo ein UD-Tag existiert).
 Bedeutungshierarchien (z. B. 2 → 2a, 2b) werden über `@xml:id`/`@idRefs`
 abgebildet: Unter-Definitionen referenzieren ihre Ober-Definition,
 Belegstellen referenzieren die zugehörige Definition.
