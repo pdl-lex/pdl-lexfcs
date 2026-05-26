@@ -226,35 +226,47 @@ def _build_paren_aware_condition(term: str, field_ref: str) -> dict:
     """
 
     def _match_one(value_expr) -> dict:
-        """$regexMatch: does `term` match the pattern derived from value_expr?
+        """$regexMatch: does `term` match the PCRE pattern derived from value_expr?
 
-        $ifNull ensures that missing/null field values produce a harmless
-        pattern ("^$") rather than propagating null into $concat, which would
-        make $regexMatch error out.
+        The stored value is used as the pattern source:
+          1. $ifNull guards against missing/null fields.
+          2. PCRE metacharacters (except ( and )) are escaped so they are
+             treated as literals rather than operators.  This prevents errors
+             like "quantifier does not follow a repeatable item" when a stored
+             value happens to contain ?, *, +, etc.
+          3. The (x) optional-char convention is converted to (?:x)?.
+
+        Note: ( and ) are intentionally NOT escaped in step 2 — they carry
+        the optional-char meaning and are handled in step 3.
         """
-        safe_expr = {"$ifNull": [value_expr, ""]}
+        # Step 1 – null safety
+        v = {"$ifNull": [value_expr, ""]}
+
+        # Step 2 – escape PCRE metacharacters in the stored value.
+        # Process backslash first to avoid double-escaping.
+        # ( and ) are excluded here; they are handled in step 3.
+        v = {"$replaceAll": {"input": v, "find": "\\",  "replacement": "\\\\"}}
+        for ch in [".", "*", "+", "?", "{", "}", "[", "]", "|", "^"]:
+            v = {"$replaceAll": {"input": v, "find": ch, "replacement": "\\" + ch}}
+        # $ is the only metachar that MongoDB would misread as a field path
+        # in the "find" position, so we use $literal there.
+        v = {"$replaceAll": {
+            "input": v,
+            "find": {"$literal": "$"},
+            "replacement": "\\$",
+        }}
+
+        # Step 3 – convert (x) notation to PCRE optional group (?:x)?
+        v = {"$replaceAll": {
+            "input": {"$replaceAll": {"input": v, "find": "(", "replacement": "(?:"}},
+            "find": ")",
+            "replacement": ")?",
+        }}
+
         return {
             "$regexMatch": {
                 "input": term,
-                "regex": {
-                    "$concat": [
-                        "^",
-                        {
-                            "$replaceAll": {
-                                "input": {
-                                    "$replaceAll": {
-                                        "input": safe_expr,
-                                        "find": "(",
-                                        "replacement": "(?:",
-                                    }
-                                },
-                                "find": ")",
-                                "replacement": ")?",
-                            }
-                        },
-                        {"$literal": "$"},   # literal "$", not a field path
-                    ]
-                },
+                "regex": {"$concat": ["^", v, {"$literal": "$"}]},
                 "options": "i",
             }
         }
