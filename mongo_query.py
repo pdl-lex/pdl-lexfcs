@@ -81,19 +81,24 @@ BARE_TERM_EXTRA_FIELDS: list = [
 def cql_to_mongo_query(
     node: Union[SearchClause, BooleanQuery],
     source_filter: Optional[list] = None,
+    include_bare_term_extra: bool = True,
 ) -> dict:
     """
     Convert a CQL AST node to a MongoDB query filter.
-    
+
     Args:
         node: Parsed CQL AST
         source_filter: Optional list of source keys (e.g. ["bwb", "wbf"])
                        to restrict the search to specific dictionaries.
-    
+        include_bare_term_extra: If False, bare-term searches only match
+                       headword.lemma and variants — the extra full-text fields
+                       (BARE_TERM_EXTRA_FIELDS) are excluded.  Used to build
+                       the "primary" filter for priority-sorted results.
+
     Returns:
         MongoDB filter document.
     """
-    query = _build_filter(node)
+    query = _build_filter(node, include_bare_term_extra)
 
     # Apply source restriction if specified
     if source_filter:
@@ -105,12 +110,15 @@ def cql_to_mongo_query(
     return query
 
 
-def _build_filter(node: Union[SearchClause, BooleanQuery]) -> dict:
+def _build_filter(
+    node: Union[SearchClause, BooleanQuery],
+    include_bare_term_extra: bool = True,
+) -> dict:
     """Recursively build a MongoDB filter from a CQL AST node."""
 
     if isinstance(node, BooleanQuery):
-        left = _build_filter(node.left)
-        right = _build_filter(node.right)
+        left = _build_filter(node.left, include_bare_term_extra)
+        right = _build_filter(node.right, include_bare_term_extra)
 
         if node.operator == "AND":
             return {"$and": [left, right]}
@@ -123,7 +131,7 @@ def _build_filter(node: Union[SearchClause, BooleanQuery]) -> dict:
             raise ValueError(f"Unknown boolean operator: {node.operator}")
 
     elif isinstance(node, SearchClause):
-        return _build_search_clause(node)
+        return _build_search_clause(node, include_bare_term_extra)
 
     else:
         raise ValueError(f"Unknown AST node type: {type(node)}")
@@ -175,7 +183,10 @@ def _has_unescaped_wildcards(term: str) -> bool:
     return False
 
 
-def _build_search_clause(clause: SearchClause) -> dict:
+def _build_search_clause(
+    clause: SearchClause,
+    include_bare_term_extra: bool = True,
+) -> dict:
     """Build a MongoDB filter for a single CQL search clause."""
 
     index = clause.index.lower()
@@ -212,9 +223,11 @@ def _build_search_clause(clause: SearchClause) -> dict:
     # search to Belegstellen fields (flatSenses.cit.text, flatSenses.def).
     # These are always matched with citation-style substring regex — no paren-aware,
     # no start/end anchors.  See BARE_TERM_EXTRA_FIELDS above.
+    # When include_bare_term_extra=False, only headword.lemma and variants are
+    # searched — used to build the "primary" filter for priority-sorted results.
     extra_fields: list = []
     belegstellen_cond: dict = {}
-    if index == "lemma" and clause.is_default and BARE_TERM_EXTRA_FIELDS:
+    if index == "lemma" and clause.is_default and BARE_TERM_EXTRA_FIELDS and include_bare_term_extra:
         extra_fields = BARE_TERM_EXTRA_FIELDS
         # Use citation-style condition (substring, case-insensitive) for Belegstellen
         belegstellen_cond = _build_condition(term, relation, modifiers, "citation")

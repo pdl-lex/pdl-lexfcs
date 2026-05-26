@@ -22,7 +22,8 @@ from sru_response import (
     SRUDiagnostic,
 )
 from cql_parser import parse_cql
-from mongo_query import cql_to_mongo_query, UnsupportedIndexError
+from mongo_query import cql_to_mongo_query, UnsupportedIndexError, BARE_TERM_EXTRA_FIELDS
+from cql_parser import SearchClause, BooleanQuery
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -368,6 +369,76 @@ async def debug_ui():
 
 
 # ---------------------------------------------------------------------------
+# Priority-sort helpers for bare-term search
+# ---------------------------------------------------------------------------
+
+
+def _has_bare_term_clause(node) -> bool:
+    """Return True if the AST contains any bare-term (default) search clause.
+
+    Bare-term clauses are those where the user gave no explicit index, e.g.
+    just "Auge" instead of 'lemma = "Auge"'.  Only for these clauses do we
+    search the extra Belegstellen fields (BARE_TERM_EXTRA_FIELDS), so only
+    for these clauses do we need priority-sorted results.
+    """
+    if isinstance(node, SearchClause):
+        return node.is_default
+    elif isinstance(node, BooleanQuery):
+        return _has_bare_term_clause(node.left) or _has_bare_term_clause(node.right)
+    return False
+
+
+async def _fetch_priority_sorted(
+    collection,
+    primary_filter: dict,
+    secondary_filter: dict,
+    primary_count: int,
+    start_record: int,
+    max_records: int,
+) -> list:
+    """Fetch a page of results with lemma/variant matches ranked before text/cit matches.
+
+    Results are split into two ordered sets:
+      primary   — documents where the term matches in headword.lemma or variants
+      secondary — documents that only match in flatSenses.cit.text / flatSenses.def
+
+    Both sets are sorted alphabetically by headword.lemma.  Pagination spans
+    both sets transparently: primary records fill the page first; once exhausted,
+    secondary records follow.
+    """
+    entries = []
+    skip = start_record - 1  # SRU is 1-based → 0-based offset
+
+    # -- Primary slice -------------------------------------------------------
+    primary_skip = min(skip, primary_count)          # how many primary to skip
+    primary_take = min(primary_count - primary_skip, max_records)
+
+    # -- Secondary slice ------------------------------------------------------
+    secondary_skip = max(0, skip - primary_count)    # how many secondary to skip
+    secondary_take = max_records - primary_take
+
+    if primary_take > 0:
+        cursor = (
+            collection.find(primary_filter)
+            .sort("headword.lemma", 1)
+            .skip(primary_skip)
+            .limit(primary_take)
+        )
+        entries.extend(await cursor.to_list(length=primary_take))
+
+    if secondary_take > 0:
+        cursor = (
+            collection.find(secondary_filter)
+            .sort("headword.lemma", 1)
+            .skip(secondary_skip)
+            .limit(secondary_take)
+        )
+        entries.extend(await cursor.to_list(length=secondary_take))
+
+    return entries
+
+
+# ---------------------------------------------------------------------------
 # Explain operation
 # ---------------------------------------------------------------------------
 
@@ -483,14 +554,34 @@ async def handle_search_retrieve(
         ).to_xml()
         return _xml_response(xml, x_indent_response)
 
+    # Fetch results — with priority sorting for bare-term searches:
+    # lemma/variant matches come before pure text/citation matches.
     try:
-        cursor = (
-            collection.find(mongo_filter)
-            .sort("headword.lemma", 1)
-            .skip(start_record - 1)  # SRU is 1-based
-            .limit(maximum_records)
-        )
-        entries = await cursor.to_list(length=maximum_records)
+        if _has_bare_term_clause(parsed) and BARE_TERM_EXTRA_FIELDS:
+            # Build a "primary" filter that only searches headword.lemma and
+            # variants (no extra Belegstellen fields).
+            primary_filter = cql_to_mongo_query(
+                parsed, source_filter, include_bare_term_extra=False
+            )
+            # "Secondary" = full match but NOT a primary (lemma/variants) match.
+            secondary_filter = {"$and": [mongo_filter, {"$nor": [primary_filter]}]}
+            primary_count = await collection.count_documents(primary_filter)
+            entries = await _fetch_priority_sorted(
+                collection,
+                primary_filter,
+                secondary_filter,
+                primary_count,
+                start_record,
+                maximum_records,
+            )
+        else:
+            cursor = (
+                collection.find(mongo_filter)
+                .sort("headword.lemma", 1)
+                .skip(start_record - 1)  # SRU is 1-based
+                .limit(maximum_records)
+            )
+            entries = await cursor.to_list(length=maximum_records)
     except Exception as e:
         diag = SRUDiagnostic(
             uri="info:srw/diagnostic/1/47",
