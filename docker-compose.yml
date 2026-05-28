@@ -7,10 +7,9 @@ services:
       MONGODB_DB: "lex"
       BASE_URL: "${BASE_URL:-https://lexfcs.lexoterm.de}"
     networks:
-      - pdl-network
+      - lexoterm-network
     restart: unless-stopped
 
 networks:
-  pdl-network:
+  lexoterm-network:
     external: true
-    name: ${DOCKER_NETWORK:-pdl-deployment_pdl-network}
