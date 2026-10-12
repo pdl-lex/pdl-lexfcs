@@ -3,6 +3,7 @@
 *.py[cod]
 assets/external/
 *.db
+.vscode/
 
 # Python-generated files
 __pycache__/
