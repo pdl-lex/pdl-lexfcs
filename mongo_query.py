@@ -5,7 +5,7 @@ Translates the CQL AST (from cql_parser) into MongoDB filter documents.
 
 Field mapping (LexCQL index -> MongoDB field):
   lemma      -> headword.lemma (+ variants)
-  definition -> flatSenses.def
+  definition -> flatSenses.def.text
   pos        -> nPos
   entryId    -> sourceId
   etymology  -> etym.text
@@ -46,8 +46,8 @@ class UnsupportedIndexError(ValueError):
 
 FIELD_MAP = {
     "lemma": ["headword.lemma", "variants"],
-    "definition": ["flatSenses.def"],
-    "def": ["flatSenses.def"],                  # Alias
+    "definition": ["flatSenses.def.text"],
+    "def": ["flatSenses.def.text"],                  # Alias
     "pos": ["pos"],
     "entryId": ["sourceId"],
     "etymology": ["etym.text"],
@@ -70,7 +70,7 @@ FIELD_MAP = {
 # Set to an empty list to disable Belegstellen extension (lemma-only default).
 BARE_TERM_EXTRA_FIELDS: list = [
     "flatSenses.cit.text",
-    "flatSenses.def",
+    "flatSenses.def.text",
 ]
 
 
@@ -220,7 +220,7 @@ def _build_search_clause(
     condition = _build_condition(term, relation, modifiers, index)
 
     # For bare-term searches (no explicit index given), optionally extend the
-    # search to Belegstellen fields (flatSenses.cit.text, flatSenses.def).
+    # search to Belegstellen fields (flatSenses.cit.text, flatSenses.def.text).
     # These are always matched with citation-style substring regex — no paren-aware,
     # no start/end anchors.  See BARE_TERM_EXTRA_FIELDS above.
     # When include_bare_term_extra=False, only headword.lemma and variants are

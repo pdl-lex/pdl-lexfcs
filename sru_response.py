@@ -41,6 +41,19 @@ def _display_lemma(entry: dict) -> str:
     return lemma
 
 
+def _def_text(sense: dict) -> str:
+    """Return the definition text of a sense.
+
+    Since the pdl-api data model change (2026-06-30) ``def`` is an object
+    ``{"text": ..., "annotations": [...]}``; before it was a plain string.
+    Both forms are accepted.
+    """
+    d = sense.get("def")
+    if isinstance(d, dict):
+        d = d.get("text")
+    return (d or "").strip()
+
+
 # ---------------------------------------------------------------------------
 # BDO search URL builder
 # ---------------------------------------------------------------------------
@@ -513,7 +526,7 @@ class SRUSearchRetrieveResponse:
         lemma_display = _display_lemma(entry)
         defs = []
         for s in entry.get("flatSenses", entry.get("sense", [])):
-            d = s.get("def", "")
+            d = _def_text(s)
             if d:
                 defs.append(d)
         hit_text = "; ".join(defs[:3]) if defs else ""
@@ -608,7 +621,7 @@ class SRUSearchRetrieveResponse:
         parent_def_id: dict[int, str] = {}
         sense_id_by_obj: dict[int, str] = {}
         for si, (sense, parent_sense) in enumerate(sense_pairs):
-            if sense.get("def"):
+            if _def_text(sense):
                 my_id = f"e{position}-d{si + 1}"
                 sense_def_ids[si] = my_id
                 sense_id_by_obj[id(sense)] = my_id
@@ -656,7 +669,7 @@ class SRUSearchRetrieveResponse:
                     "                <lex:Value"
                     + attrs
                     + ">"
-                    + xml_escape(sense["def"])
+                    + xml_escape(_def_text(sense))
                     + "</lex:Value>"
                 )
             parts.append("              </lex:Field>")

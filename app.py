@@ -400,7 +400,7 @@ async def _fetch_priority_sorted(
 
     Results are split into two ordered sets:
       primary   — documents where the term matches in headword.lemma or variants
-      secondary — documents that only match in flatSenses.cit.text / flatSenses.def
+      secondary — documents that only match in flatSenses.cit.text / flatSenses.def.text
 
     Both sets are sorted alphabetically by headword.lemma.  Pagination spans
     both sets transparently: primary records fill the page first; once exhausted,

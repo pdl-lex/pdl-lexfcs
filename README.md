@@ -131,7 +131,7 @@ Das bedeutet: Treffer sind Einträge, bei denen „Haus" entweder als Stichwort 
 
 > **Hinweis für Entwickler:** Welche Zusatzfelder bei der Freitextsuche durchsucht werden,
 > steuert die Konstante `BARE_TERM_EXTRA_FIELDS` in `mongo_query.py`.
-> Standard: `["flatSenses.cit.text", "flatSenses.def"]`.
+> Standard: `["flatSenses.cit.text", "flatSenses.def.text"]`.
 > Auf `[]` setzen, um ausschließlich im Lemma zu suchen.
 
 ### Feldsuche (Index-Query)
@@ -148,7 +148,7 @@ Verfügbare Felder:
 | LexCQL-Feld | Beschreibung | MongoDB-Feld |
 |-------------|--------------|--------------|
 | `lemma` | Stichwort (Default) | `headword.lemma`, `variants` |
-| `definition` / `def` | Bedeutungserklärung | `flatSenses.def` |
+| `definition` / `def` | Bedeutungserklärung | `flatSenses.def.text` |
 | `pos` | Wortart (englische/UD-Werte, s. u.) | `pos` |
 | `entryId` | Eintrags-ID | `sourceId` |
 | `etymology` | Herkunft | `etym.text` |
