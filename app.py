@@ -29,7 +29,7 @@ from cql_parser import SearchClause, BooleanQuery
 # Configuration
 # ---------------------------------------------------------------------------
 
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:cvoi6a6@localhost:27017/admin")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://admin:abcde@localhost:27017/admin")
 MONGODB_DB = os.getenv("MONGODB_DB", "lex")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8080")
 
